@@ -1,0 +1,29 @@
+{
+  "name": "jsgui-node-png",
+  "version": "0.1.0",
+  "main": "jsgui-node-png.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/metabench/jsgui-node-png"
+  },
+  "keywords": [
+    "png",
+    "image",
+    "jsgui"
+  ],
+  "dependencies" : {
+    "jsgui-lang-essentials" :  "0.3.x"
+  },
+  "author": "James Vickers <james@metabench.com>",
+  "description": "jsgui - PNG module. Load, save, use scanline filters, supports 32bpp rgba, 24bpp rgb, and 1, 2, 4 and 8 bpp indexed color.",
+  "contributors": [ 
+    {
+      "name": "James Vickers",
+      "email": "james@metabench.com"
+    } 
+  ],
+  "license": "MIT"
+}
