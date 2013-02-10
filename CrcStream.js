@@ -20,6 +20,10 @@
 
 //'use strict';
 
+if (typeof define !== 'function') {
+    var define = require('amdefine')(module);
+}
+
 define(["util", "stream"], function(util, Stream) {
 	
     var CrcStream = function() {

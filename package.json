@@ -15,7 +15,9 @@
     "jsgui"
   ],
   "dependencies" : {
-    "jsgui-lang-essentials" :  "0.3.x"
+    "jsgui-lang-essentials" :  "0.3.x",
+    "jsgui-node-pixel-buffer" :  "0.1.x",
+    "amdefine": ">=0.0.4"
   },
   "author": "James Vickers <james@metabench.com>",
   "description": "jsgui - PNG module. Load, save, use scanline filters, supports 32bpp rgba, 24bpp rgb, and 1, 2, 4 and 8 bpp indexed color.",
