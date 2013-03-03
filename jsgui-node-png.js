@@ -1,22 +1,8 @@
 if (typeof define !== 'function') {
     var define = require('amdefine')(module);
 }
-// could also use image_buffer...
-//  will get a new image_buffer from a PNG.
 
-//  will also load an image_buffer from 
-
-// May need more work on PNGs with palettes.
-//  Have been working on truecolor 32 and 24 and filter handling.
-
-// Faster choice of optimized scanline filters would be good as well.
-//  Calling node's deflate on each scanline is a bit slow.
-//  Thinking about counting unique 4 byte words (readUInt32 results).
-//   Then the one with least variation would be the one to use.
-
-// PNGs are coming along nicely... but want the main JSGUI server to run.
-
-
+// Not yet supporting greyscale, need to do more work on indexed color modes.
 
 define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-buffer'], 
     function(jsgui, fs, zlib, CrcStream, Pixel_Buffer) {
@@ -25,8 +11,6 @@ define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-
         var fp = jsgui.fp, tof = jsgui.tof;
         var Fns = jsgui.Fns;
         var arrayify = jsgui.arrayify;
-        
-        
         
         //var get_deflated_length = arrayify(function(buffer, callback) {
         var get_deflated_length = (function(buffer, callback) {
@@ -55,9 +39,6 @@ define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-
             });
             deflate.end(buffer);
         });
-        
-        
-        
         
         /*
 
