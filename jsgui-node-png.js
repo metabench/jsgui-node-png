@@ -1,17 +1,63 @@
 if (typeof define !== 'function') {
     var define = require('amdefine')(module);
 }
-
 // could also use image_buffer...
 //  will get a new image_buffer from a PNG.
 
 //  will also load an image_buffer from 
 
-define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-buffer'], 
+// May need more work on PNGs with palettes.
+//  Have been working on truecolor 32 and 24 and filter handling.
+
+// Faster choice of optimized scanline filters would be good as well.
+//  Calling node's deflate on each scanline is a bit slow.
+//  Thinking about counting unique 4 byte words (readUInt32 results).
+//   Then the one with least variation would be the one to use.
+
+// PNGs are coming along nicely... but want the main JSGUI server to run.
+
+
+
+define(['./jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', './jsgui-node-pixel-buffer'], 
     function(jsgui, fs, zlib, CrcStream, Pixel_Buffer) {
         
-        
         var stringify = jsgui.stringify, each = jsgui.each, is_defined = jsgui.is_defined;
+        var fp = jsgui.fp, tof = jsgui.tof;
+        var Fns = jsgui.Fns;
+        var arrayify = jsgui.arrayify;
+        
+        
+        
+        //var get_deflated_length = arrayify(function(buffer, callback) {
+        var get_deflated_length = (function(buffer, callback) {
+            var deflate = zlib.createDeflate({
+                chunkSize: 32 * 1024,
+                level: 9,
+                strategy: 3,
+                windowBits: 15,
+                memLevel: 9
+            });
+            //deflate.on('error', this.emit.bind(this, 'error'));
+            deflate.on('error', function() {
+                console.log('deflate error');
+            });
+    
+            //var buffers = [];
+            var nread = 0;
+        
+            var that = this;
+        
+            deflate.on('data', function(chunk) {
+                nread = nread + chunk.length;
+            });
+            deflate.on('end', function() {
+                callback(null, nread);
+            });
+            deflate.end(buffer);
+        });
+        
+        
+        
         
         /*
 
@@ -111,14 +157,78 @@ PNG compression method 0
                 
                 this.map_unfiltered_scanline_buffers = {};
                 
+                // when initialized with the size, will create a buffer
+                
+                if (spec.size) {
+                    this.size = spec.size;
+                }
+                
+                if (spec.color_type) {
+                    this.color_type = spec.color_type;
+                }
+                
+                if (spec.bit_depth) {
+                    this.bit_depth = spec.bit_depth;
+                }
+                
+                if (this.size && this.color_type && this.bit_depth) {
+                    this.init_scanlines_buffer(this.size, this.color_type, this.bit_depth);
+                }
+                // Can create a new scanlines buffer when initialized.
+                // maybe only if the bit depth and color mode are specified.
+            },
+            
+            // this one holds the actual data. A different one would hold the uncompressed data.
+            //  Perhaps forget about this buffer once the data has been decompressed?
+            'init_scanlines_buffer': function(size, color_type, bit_depth) {
+                
+                var scanline_image_data_length;
+                var that = this;
+                // and depends on the color mode.
+                
+                if (bit_depth == 1) {
+                    scanline_image_data_length = Math.ceil(size[0] / 8);
+                }
+                if (bit_depth == 2) {
+                    scanline_image_data_length = Math.ceil(size[0] / 4);
+                }
+                if (bit_depth == 4) {
+                    scanline_image_data_length = Math.ceil(size[0] / 2);
+                }
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        scanline_image_data_length = size[0] * 3;
+                    } else if (color_type == 6) {
+                        scanline_image_data_length = size[0] * 4;
+                    }
+                }
+            
+                // bit depth 16...
+                //  was not expecting that. greyscale of some kind.
+                
+                
+                //console.log('scanline_image_data_length ' + scanline_image_data_length);
+                
+                // scanline_length depends on the number of bits per pixel.
+                
+                var scanline_length = scanline_image_data_length + 1;
+                
+                //console.log('scanline_length ' + scanline_length);
+                
+                that.scanline_image_data_length = scanline_image_data_length;
+                that.scanline_length = scanline_length;
+                
+                var scanlines_buffer_length = that.scanline_length * that.size[1];
+                that.scanlines_buffer_length = scanlines_buffer_length;
+                
+                var scanlines_buffer = new Buffer(scanlines_buffer_length);
+                that.scanlines_buffer = scanlines_buffer;
+                
             },
             
             // Want to be able to get and set pixels.
             //  Also want to be able to use this for the spritesheet, so the pixels can get composed in a pixel buffer,
             //  and then saved as a PNG.
-            
-            
-            
             
             
             // want to be able to change what filter is used on any row.
@@ -163,7 +273,6 @@ PNG compression method 0
             // Reencoding parts of the image after a change, would be more efficient regarding CPU.
             //  Could get fairly finely grained about that, not sure if it is worth it right now.
             
-            
             // apply scanline filter to all rows...
             
             // set the scanline filter on a row, but first cache its unfiltered scanline buffer
@@ -174,13 +283,13 @@ PNG compression method 0
                     this.set_scanline_filter(y, scanline_filter_num);
                 }
             },
-            
             // set_scanline_filter_byte
             
             'set_scanline_filter': function(scanline_num, scanline_filter_byte) {
-                this.map_unfiltered_scanline_buffers[scanline_num] = this.get_unfiltered_scanline_buffer(scanline_num);
-            
+                //this.map_unfiltered_scanline_buffers[scanline_num] = this.get_unfiltered_scanline_buffer(scanline_num);
                 this.set_scanline_filter_byte(scanline_num, scanline_filter_byte);
+                
+                // And then when saving it it should be 
             },
             
             // More work on the save function needed... needs to reencode each scanline.
@@ -195,6 +304,23 @@ PNG compression method 0
             // set_scanline_filter_byte
             
             'set_scanline_filter_byte': function(scanline_num, scanline_filter_byte) {
+                if (!this.scanline_length) {
+                    //throw '!!stop';
+                    //console.log('this.bit_depth ' + this.bit_depth);
+                    if (this.bit_depth == 8) {
+                        if (this.color_type == 2) {
+                            this.scanline_length = this.size[0] * 3 + 1;
+                        }
+                        if (this.color_type == 6) {
+                            this.scanline_length = this.size[0] * 4 + 1;
+                        }
+                    } else {
+                        throw 'currently unsupported';
+                    }
+                }
+                
+                //console.log('scanline_length ' + this.scanline_length);
+                //throw 'stop';
                 var h = this.size[1], scanline_length = this.scanline_length, scanlines_buffer = this.scanlines_buffer;
                 var scanline_start = scanline_num * scanline_length;
                 scanlines_buffer.writeUInt8(scanline_filter_byte, scanline_start);
@@ -218,25 +344,19 @@ PNG compression method 0
             
             'get_filtered_scanline_buffer': function(scanline_num) {
                 // may re-encode it... not sure.
-                
                 // It would not need reencoding at all times.
-                
                 // consult a map of which have changed?
-                throw 'Not yet implemented... will return the existing scanline buffer if it has been unchanged.'
-                
-                
+                throw 'Not yet implemented... will return the existing scanline buffer if it has been unchanged.';
             },
             // ?
             'calc_filtered_scanline_buffer': function(scanline_num) {
                 // may re-encode it... not sure.
                 
                 // It would not need reencoding at all times.
-                
                 // consult a map of which have changed?
                 //throw 'Not yet implemented... will return the existing scanline buffer if it has been unchanged.'
                 
                 // do this over each row?
-                
                 // or reencode all rows?
                 
                 
@@ -248,647 +368,297 @@ PNG compression method 0
             
             'get_rgba_pixel_buffer': function() {
                 // could be optimized (maybe just for some cases).
-            
+                // can optimize this a lot.
+                //  when in the right mode, can almost read this out of the unfiltered scanlines buffer.
+                
                 var res = new Pixel_Buffer({
                     'size': this.size
                 });
                 
                 var color_type = this.color_type;
                 
+                // without iterating the pixels?
+                //  having that inline would speed it up (a lot).
+                
+                var dest_buffer = res.buffer;
+                
+                //console.log('get_rgba_pixel_buffer color_type ' + color_type);
+                
+                // Slower here I think.
+                
                 if (color_type == 2) {
-                    this.iterate_pixels(function(x, y, px) {
-                        px[3] = 255;
-                        res.set_pixel(x, y, px);
+                    this.iterate_pixels(function(x, y, r, g, b) {
+                        //console.log('r ' + r);
+                        //console.log('g ' + g);
+                        //console.log('b ' + b);
+                        
+                        var alpha = 255;
+                        
+                        //px[3] = 255;
+                        res.set_pixel(x, y, r, g, b, alpha);
                     });
                 } else if (color_type == 6) {
-                    this.iterate_pixels(function(x, y, px) {
+                    // write directly to the res buffer, using the unfiltered scanlines.
+                    // copy to res.buffer.
+                    // get the unfiltered scanlines...
+                    var dest_buffer_line_length = 4 * this.size[0];
+                    var unfiltered_scanlines_buffer_line_length = (4 * this.size[0]) + 1;
+                    
+                    //var dest_buffer_length = dest_buffer.length;
+                    
+                    //console.log('old_dest_buffer_length ' + old_dest_buffer_length);
+                    //console.log('dest_buffer_length ' + dest_buffer_length);
+                    var dest_buffer_start_pos, unfiltered_scanline_buffer;
+                    var unfiltered_scanlines_buffer_start_pos;
+                    var unfiltered_scanlines_buffer_end_pos;
+                    //var get_unfiltered_scanline_buffer = this.get_unfiltered_scanline_buffer;
+                    
+                    // make sure it has its unfiltered scanlines buffer.
+                    //  then copy from parts of that.
+                    //  don't want to be creating a buffer for each scanline.
+                    
+                    this.ensure_unfiltered_scanlines_buffer();
+                    // reverse filtering the whole thing should not take too long.
+                    // but will keep track of when different parts of it have been modified.
+                    //  with PNGs in memory, may prefer to work on the unfiltered scanlines buffer.
+                    //  will need to keep them syncronised with changes.
+                    
+                    
+                    var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                    
+                    
+                    
+                    for (var c = 0, l = this.size[1]; c < l; c++) {
+                        dest_buffer_start_pos = dest_buffer_line_length * c;
+                        unfiltered_scanlines_buffer_start_pos = unfiltered_scanlines_buffer_line_length * c;
+                        unfiltered_scanlines_buffer_end_pos = unfiltered_scanlines_buffer_start_pos + unfiltered_scanlines_buffer_line_length;
                         
-                        res.set_pixel(x, y, px);
-                    });
+                        //unfiltered_scanline_buffer = this.get_unfiltered_scanline_buffer(c);
+                        // buf.copy(targetBuffer, [targetStart], [sourceStart], [sourceEnd])#
+                        // don't copy from pos 0.
+                        
+                        //var uf_len = unfiltered_scanline_buffer.length;
+                        //unfiltered_scanline_buffer.copy(dest_buffer, dest_buffer_start_pos, 1);
+                        //console.log('dest_buffer_start_pos ' + dest_buffer_start_pos);
+                        //console.log('unfiltered_scanlines_buffer_start_pos ' + unfiltered_scanlines_buffer_start_pos);
+                        //console.log('unfiltered_scanlines_buffer_end_pos ' + unfiltered_scanlines_buffer_end_pos);
+                        //console.log('unfiltered_scanlines_buffer.length ' + unfiltered_scanlines_buffer.length);
+                        
+                        unfiltered_scanlines_buffer.copy(dest_buffer, dest_buffer_start_pos, unfiltered_scanlines_buffer_start_pos + 1, unfiltered_scanlines_buffer_end_pos);
+                        
+                    }
+                    
                 } else {
                     this.iterate_pixels(function(x, y, px) {
                         if (px.length == 3) px[3] = 255;
                         res.set_pixel(x, y, px);
                     });
                 }
-                
-                
-                
                 return res;
             },
-            
             
             // will be used for random access to pixels.
             //  will rapidly change the unfiltered scanlines.
             //  then when saving or accessing the filtered scanlines, will calculate the filtered scanlines.
-            'get_unfiltered_scanline_buffer': function(scanline_num) {
-                // find out what filter is in operation there.
-                //  will be consulting the filtered scanline buffer where needed.
-                var y = scanline_num;
-                // and will save it in a cache.
-                if (this.map_unfiltered_scanline_buffers[scanline_num]) {
-                    return this.map_unfiltered_scanline_buffers[scanline_num];
-                } else {
-                    // go through the line... may need to get the above unfiltered scanline buffer.
-                    //  could be used in iterating the pixels... so maybe copy code over from there before deleting it from there.
-                    // this can be optimized a fair bit.
+            
+            // May be better to edit this in a local environment and then copy to and from the github directories.
+            //  The automated file sync / update will be best.
+            
+            // Module Staging <-> Development Directory
+            // --------------     ---------------------
+            //
+            // Automatically updates items from each based on the last edit times.
+            //  Means that you can keep a bunch of modules in their own github or repo directories.
+            //  Also work on them in a directory that contains a whole bunch of modules edited together.
+            //   Means a lot of development can be done using the modules locally, and then they can be copied to their package directories
+            //    for deployment to github and npm.
+            //  Could also have automatic republishing of changed modules.
+            
+            // 2 way updating... for when I have been working on things within the package folder.
+            //  A utility module called 'update' makes sense for this.
+            // It knows the path of the packages directory
+            
+            // development
+            // packages.
+            
+            // localized-deflate is the best scanline optimization so far.
+            // I think looking back quite far at a window of previous data would be the best.
+            //  Seeing how many recurring patterns are within the proposed unfiltered scanline, and scanlines stretching back a bit.
+            //  We could keep track of the window of previous items... but analysing it for groups (n-grams) each time?
+            //  Could have some sort of revolving tree?
+            //   Would possibly slow it down too much?
+            //    What about something efficient somehow?
+            //     But want to replicate delate's window to some extent.
+            
+            
+            
+            // jsgui-node-update
+            
+            // a function that gets an unviltered scanline buffer for the whole image...
+            //  will be faster than doing it row by row, setting up new variables for each row.
+            
+            // should not take all that long. will be faster then getting an unfiltered buffer for each scanline.
+            //  simpler code than using the r,g,b(,a) components
+            
+            'ensure_unfiltered_scanlines_buffer': function() {
+                // does it for all scanlines.
+                //console.log('ensure_unfiltered_scanlines_buffer');
+                // needs to go through the (filtered) scanlines buffer and unfilter them.
+                
+                //console.log('ensure_unfiltered_scanlines_buffer');
+                
+                // could check all scanlines first, see if they are all 0.
+                //  if so, we may not need to do anything.
+                //   need to develop some rules for dealing with this.
+                
+                var scanline_length = this.scanline_length;
+                var scanlines_buffer_length = scanline_length * this.size[1];
+                
+                if (!this.unfiltered_scanlines_buffer || this.unfiltered_scanlines_buffer.length != scanlines_buffer_length);
+                
+                this.unfiltered_scanlines_buffer = new Buffer(scanlines_buffer_length);
+                //console.log('this.unfiltered_scanlines_buffer.length ' + this.unfiltered_scanlines_buffer.length);
+                
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                
+                var w = this.size[0], scanlines_buffer = this.scanlines_buffer;
+                var color_type = this.color_type, bit_depth = this.bit_depth;
+                var scanline_filter_byte;
+                var scanline_start, scanline_end;
+                
+                var bytes_per_pixel = -1;
+                
+                if (color_type == 2 && bit_depth == 8) {
+                    bytes_per_pixel = 3;
+                }
+                if (color_type == 6 && bit_depth == 8) {
+                    bytes_per_pixel = 4;
+                }
+                
+                var unfiltered_byte_above;
+                var unfiltered_byte_left;
+                var unfiltered_byte_above_left;
+                var byte_above_pos;
+                var byte_left_pos;
+                var byte_above_left_pos;
+                
+                var b;
+                
+                var byte_pos;
+                var filtered_byte;
+                var unfiltered_byte;
+                // maybe variables for byte_above?
+                
+                for (var y = 0, h = this.size[1]; y < h; y++) {
+                    scanline_start = y * scanline_length;
+                    scanline_filter_byte = scanlines_buffer.readUInt8(scanline_start);
                     
-                    // go through the scanline itself... if it is filter 0, cache it, return it.
-                    //  otherwise, there is more work to do.
-                    var w = this.size[0], h = this.size[1], scanline_length = this.scanline_length, scanlines_buffer = this.scanlines_buffer;
-                    var color_type = this.color_type, bit_depth = this.bit_depth;
-                    var scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
-                    var scanline_start = scanline_num * scanline_length;
-                    var scanline_end = scanline_start + scanline_length;
-                    var res_buffer = new Buffer(scanline_length);
+                    // if we have loaded an image with all scanline filters 0, we can put it directly into the unfiltered buffer.
+                    //   Think it would be an optimization at this stage.
+                    //   avoiding as many buffer copies.
                     
-                    var r, g, b, a;
-                    var defiltered_r, defiltered_g, defiltered_b, defiltered_a;
-                    var last_defiltered_r = 0, last_defiltered_g = 0, last_defiltered_b = 0, last_defiltered_a = 0;
+                    //console.log('scanline_filter_byte ' + scanline_filter_byte);
+                    
+                    // then need to decode that scanline... going through it byte by byte?
+                    //  or could get 4 byte words from it, and use bit shifting, and bit masks possibly to extract various values from it?
+                    
+                    // or could continue to read the bytes into r, g, b, a as before. i don't think that was taking so long. I think it was all the making of new buffers,
+                    //  not sure though. Reading and writing bytes to buffers may be faster than bit shifing. Not sure.
+                    //  however, may not need to keep track of rgba, and can more closely follow directions, knowing what offset to do for any byte value.
+                    //  what offset backwards, what offset up.
+                    
+                    //  could have smaller code here.
+                    
+                    // can start with scanline filtering of 2.
+                    
+                    // left, above, average, paeth
+                    unfiltered_scanlines_buffer.writeUInt8(0, scanline_start);
                     
                     if (scanline_filter_byte == 0) {
-                        scanlines_buffer.copy(res_buffer, 0, scanline_start, scanline_end);
-                    } else {
-                        // decode the scanline.
-                        // if it's scanline filters 2, 3 or 4, we need the unfiltered_scanline_buffer above (if there is one)
-                        //  otherwise we could make a fake one.
-                        // iterate over each of the items in the scanline.
+                        // copy over that scanline
+                        scanlines_buffer.copy(unfiltered_scanlines_buffer, scanline_start, scanline_start + scanline_length);
                         
-                        if (scanline_filter_byte == 1) {
-                            // can do this within the scanline.
-                            // go through the buffer... will depend on the color depth.
-                            // filters with indexed color?
-                            
-                            // move through it based on the number of bytes per pixel...
-                            //  not sure how it will work with indexed color.
-                            
-                            // rgba (6)
-                            //  32 bpp
-                            // rgb (2)
-                            //  24 bpp
-                            
-                            if (color_type == 2) {
-                                // go through the line, getting the pixel values. like below
-                                
-                                // for loop, track x value.
-                                
-                                // rgb 24
-                                if (bit_depth == 8) {
-                                    
-                                    //console.log('DECODE ct 2 bd 8');
-                                    
-                                    // go through the values of the scanline, looking at the pixels.
-                                    var res = new Buffer(scanline_length);
-                                    res.writeUInt8(0, 0);
-                                    //var last_defiltered_px = [0, 0, 0];
-                                    
-                                    //var num_bytes_per_pixel = 3;
-                                    
-                                    for (var x = 0; x < w; x++) {
-                                        // extract rgb values...
-                                        //  3 bytes
-                                        r = scanlines_buffer.readUInt8(scanline_start + 1 + x * 3);
-                                        g = scanlines_buffer.readUInt8(scanline_start + 2 + x * 3);
-                                        b = scanlines_buffer.readUInt8(scanline_start + 3 + x * 3);
-                                        
-                                        //var px = [r, g, b];
-                                        //console.log('px ' + stringify(px));
-                                        
-                                        // then do the unfiltering.
-                                        //var unfiltered
-                                        
-                                        defiltered_r = r + last_defiltered_r;
-                                        defiltered_g = g + last_defiltered_g;
-                                        defiltered_b = b + last_defiltered_b;
-                                        
-                                        if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                        if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                        if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                        
-                                        //var defiltered_px = [defiltered_r, defiltered_g, defiltered_b];
-                                        
-                                        //console.log('defiltered_px ' + stringify(defiltered_px));
-                                        
-                                        res.writeUInt8(defiltered_r, x * 3 + 1);
-                                        res.writeUInt8(defiltered_g, x * 3 + 2);
-                                        res.writeUInt8(defiltered_b, x * 3 + 3);
-                                        
-                                        //last_defiltered_px = defiltered_px;
-                                        
-                                        last_defiltered_r = defiltered_r;
-                                        last_defiltered_g = defiltered_g;
-                                        last_defiltered_b = defiltered_b;
-                                        //last_defiltered_a = defiltered_a;
-                                    }
-                                    return res;
-                                    
-                                } else {
-                                    throw 'Unsupported bit_depth ' + bit_depth;
-                                }
-                                
-                                
-                                
-                            } else if (color_type == 6) {
-                                
-                                // RGBA. Will use a multiplier by 4, process the alpha channel.
-                                
-                                // rgb 32
-                                if (bit_depth == 8) {
-                                    
-                                    //console.log('DECODE ct 2 bd 8');
-                                    
-                                    // go through the values of the scanline, looking at the pixels.
-                                    var res = new Buffer(scanline_length);
-                                    res.writeUInt8(0, 0);
-                                    //var last_defiltered_px = [0, 0, 0, 0];
-                                    
-                                    //var num_bytes_per_pixel = 3;
-                                    
-                                    for (var x = 0; x < w; x++) {
-                                        // extract rgb values...
-                                        //  3 bytes
-                                        r = scanlines_buffer.readUInt8(scanline_start + 1 + x * 4);
-                                        g = scanlines_buffer.readUInt8(scanline_start + 2 + x * 4);
-                                        b = scanlines_buffer.readUInt8(scanline_start + 3 + x * 4);
-                                        a = scanlines_buffer.readUInt8(scanline_start + 4 + x * 4);
-                                        
-                                        //var px = [r, g, b, a];
-                                        //console.log('px ' + stringify(px));
-                                        
-                                        // then do the unfiltering.
-                                        //var unfiltered
-                                        
-                                        defiltered_r = r + last_defiltered_r;
-                                        defiltered_g = g + last_defiltered_g;
-                                        defiltered_b = b + last_defiltered_b;
-                                        defiltered_a = a + last_defiltered_a;
-                                        
-                                        if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                        if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                        if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                        if (defiltered_a > 255) defiltered_a = defiltered_a - 256;
-                                        
-                                        //var defiltered_px = [defiltered_r, defiltered_g, defiltered_b, defiltered_a];
-                                        
-                                        //console.log('defiltered_px ' + stringify(defiltered_px));
-                                        
-                                        res.writeUInt8(defiltered_r, x * 4 + 1);
-                                        res.writeUInt8(defiltered_g, x * 4 + 2);
-                                        res.writeUInt8(defiltered_b, x * 4 + 3);
-                                        res.writeUInt8(defiltered_a, x * 4 + 4);
-                                        
-                                        //last_defiltered_px = defiltered_px;
-                                        last_defiltered_r = defiltered_r;
-                                        last_defiltered_g = defiltered_g;
-                                        last_defiltered_b = defiltered_b;
-                                        last_defiltered_a = defiltered_a;
-                                    }
-                                    return res;
-                                    
-                                } else {
-                                    throw 'Unsupported bit_depth ' + bit_depth;
-                                }
-                                
-                                
-                            } else {
-                                throw 'unsupported color type for scanline filter 1';
+                    } else if (scanline_filter_byte == 1) {
+                        for (b = 1; b < scanline_length; b++) {
+                            // get the byte above.
+                            unfiltered_byte_left = 0;
+                            byte_pos = scanline_start + b;
+                            if (b >= bytes_per_pixel) {
+                                byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
                             }
-                            
-                        } else if (scanline_filter_byte == 2) {
-                            // up filter
-                            // read the rows while using a different scanline filter.
-                            
-                            // this time we can get the scanline filter above.
-                            //  (except where scanline_num == 0, in that case it is the unfiltered values.);
-                            
-                            // need color_type 2 or 6
-                            var that = this;
-                            var process_bytes_above = function() {
-                                if (y == 0) {
-                                    var new_unfiltered_scanline_buffer = new Buffer(scanline_length);
-                                    scanlines_buffer.copy(new_unfiltered_scanline_buffer, 0, scanline_start, scanline_end);
-                                    scanlines_buffer.writeUInt8(0, 0);
-                                    that.map_unfiltered_scanline_buffers[y] = new_unfiltered_scanline_buffer;
-                                    return new_unfiltered_scanline_buffer;
-                                    
-                                    // copy from the filtered scanline... maybe have a function for that.
-                                } else {
-                                    var uf_sb_above = that.get_unfiltered_scanline_buffer(y - 1);
-                                    
-                                    // then go through the current scanline... and do the maths.
-                                    
-                                    var new_unfiltered_scanline_buffer = new Buffer(scanline_length);
-                                    new_unfiltered_scanline_buffer.writeUInt8(0, 0);
-                                    // byte by byte
-                                    for (var c = 1; c < scanline_length; c++) {
-                                        var byte_val = scanlines_buffer.readUInt8(scanline_start + c);
-                                        //console.log('byte_val ' + byte_val);
-                                        
-                                        // and need to look at the byte val above
-                                        
-                                        var byte_val_above = uf_sb_above.readUInt8(c);
-                                        //console.log('byte_val_above ' + byte_val_above);
-                                        
-                                        var new_byte_val = byte_val + byte_val_above;
-                                        if (new_byte_val > 255) new_byte_val = new_byte_val - 256;
-                                        new_unfiltered_scanline_buffer.writeUInt8(new_byte_val, c);
-                                    }
-                                    that.map_unfiltered_scanline_buffers[y] = new_unfiltered_scanline_buffer;
-                                    return new_unfiltered_scanline_buffer;
-                                }
+                            filtered_byte = scanlines_buffer.readUInt8(byte_pos);
+                            unfiltered_byte = unfiltered_byte_left + filtered_byte;
+                            if (unfiltered_byte > 255) unfiltered_byte = unfiltered_byte - 256;
+                            unfiltered_scanlines_buffer.writeUInt8(unfiltered_byte, byte_pos);
+                        }
+                    } else if (scanline_filter_byte == 2) {
+                        // above
+                        for (b = 1; b < scanline_length; b++) {
+                            // get the byte above.
+                            unfiltered_byte_above = 0;
+                            byte_pos = scanline_start + b;
+                            if (y > 0) {
+                                byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_above = unfiltered_scanlines_buffer.readUInt8(byte_above_pos);
                             }
-                            
-                            if (color_type == 2) {
-                                if (bit_depth == 8) {
-                                    //throw 'currently unsupported';
-                                    process_bytes_above();
-                                    // get the unfiltered scanline above.
-                                    // if y == 0, return a copy of this scanline but with the filter changed to 0.
-                                    
-                                } else {
-                                    throw 'unsupported bit depth with scanline filter 2';
-                                }
-                                
-                            } else if (color_type == 6) {
-                                if (bit_depth == 8) {
-                                    // color type 6 = Truecolor & alpha rgba
-                                    //  looks exactly the same as above... processes the byte above.
-                                    
-                                    process_bytes_above();
-                                    
-                                    //throw 'currently unsupported';
-                                    
-                                } else {
-                                    throw 'unsupported bit depth with scanline filter';
-                                }
-                            } else {
-                                throw ('unsupported color_type ' + color_type + ' with scanline_filter ' + scanline_filter_byte);
+                            filtered_byte = scanlines_buffer.readUInt8(byte_pos);
+                            unfiltered_byte = unfiltered_byte_above + filtered_byte;
+                            if (unfiltered_byte > 255) unfiltered_byte = unfiltered_byte - 256;
+                            unfiltered_scanlines_buffer.writeUInt8(unfiltered_byte, byte_pos);
+                        }
+                    } else if (scanline_filter_byte == 3) {
+                        // average of up and left.
+                        for (b = 1; b < scanline_length; b++) {
+                            unfiltered_byte_above = 0;
+                            unfiltered_byte_left = 0;
+                            byte_pos = scanline_start + b;
+                            if (y > 0) {
+                                byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_above = unfiltered_scanlines_buffer.readUInt8(byte_above_pos);
                             }
-                            
-                            //throw 'unsupported scanline filter ' + scanline_filter_byte;
-                        } else if (scanline_filter_byte == 3) {
-                            // average of left and up... support this scanline filter here.
-                            
-                            // For color type 2, and 6
-                            //  bit depth 8 bits per sample for the moment, 24 and 32 bpp.
-                            
-                            if (color_type == 2) {
-                                if (bit_depth == 8) {
-                                    
-                                    //console.log('DECODE ct 2 bd 8');
-                                    
-                                    // go through the values of the scanline, looking at the pixels.
-                                    var res = new Buffer(scanline_length);
-                                    res.writeUInt8(0, 0);
-                                    var last_defiltered_px = [0, 0, 0];
-                                    
-                                    //var num_bytes_per_pixel = 3;
-                                    
-                                    // need to look at the scanline above.
-                                    var uf_sb_above = this.get_unfiltered_scanline_buffer(y - 1);
-                                    
-                                    
-                                    for (var x = 0; x < w; x++) {
-                                        // extract rgb values...
-                                        //  3 bytes
-                                        r = scanlines_buffer.readUInt8(scanline_start + 1 + x * 3);
-                                        g = scanlines_buffer.readUInt8(scanline_start + 2 + x * 3);
-                                        b = scanlines_buffer.readUInt8(scanline_start + 3 + x * 3);
-                                        //var a = scanlines_buffer.readUInt8(scanline_start + 4 + x * 4);
-                                        
-                                        //var px = [r, g, b, a];
-                                        var px = [r, g, b];
-                                        //console.log('px ' + stringify(px));
-                                        
-                                        // then do the unfiltering.
-                                        //var unfiltered
-                                        
-                                        // pixel value above, pixel value to left. Take avg of them.
-                                        
-                                        var pixel_above = [0, 0, 0];
-                                        var r_above = 0;
-                                        var g_above = 0;
-                                        var b_above = 0;
-                                        if (scanline_num > 0) {
-                                            // read pixel from unfiltered scanline above
-                                            //pixel_above = uf_sb_above.readUInt8(c);
-                                            
-                                            r_above = uf_sb_above.readUInt8(x * 3 + 1);
-                                            g_above = uf_sb_above.readUInt8(x * 3 + 2);
-                                            b_above = uf_sb_above.readUInt8(x * 3 + 3);
-                                        }
-                                        
-                                        defiltered_r = r + Math.floor((r_above + last_defiltered_px[0]) / 2);
-                                        defiltered_g = g + Math.floor((g_above + last_defiltered_px[1]) / 2);
-                                        defiltered_b = b + Math.floor((b_above + last_defiltered_px[2]) / 2);
-                                        
-                                        if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                        if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                        if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                        //if (defiltered_a > 255) defiltered_a = defiltered_r - 256;
-                                        
-                                        var defiltered_px = [defiltered_r, defiltered_g, defiltered_b];
-                                        
-                                        //console.log('defiltered_px ' + stringify(defiltered_px));
-                                        
-                                        res.writeUInt8(defiltered_r, x * 3 + 1);
-                                        res.writeUInt8(defiltered_g, x * 3 + 2);
-                                        res.writeUInt8(defiltered_b, x * 3 + 3);
-                                        r//es.writeUInt8(defiltered_a, x * 3 + 4);
-                                        
-                                        last_defiltered_px = defiltered_px;
-                                    }
-                                    return res;
-                                    
-                                } else {
-                                    throw 'Unsupported bit_depth ' + bit_depth;
-                                }
-                            } else if (color_type == 6) {
-                                if (bit_depth == 8) {
-                                    
-                                    var res = new Buffer(scanline_length);
-                                    res.writeUInt8(0, 0);
-                                    var last_defiltered_px = [0, 0, 0, 0];
-                                    //var num_bytes_per_pixel = 3;
-                                    
-                                    // need to look at the scanline above.
-                                    var uf_sb_above = this.get_unfiltered_scanline_buffer(y - 1);
-                                    
-                                    for (var x = 0; x < w; x++) {
-                                        // extract rgb values...
-                                        //  3 bytes
-                                        r = scanlines_buffer.readUInt8(scanline_start + 1 + x * 4);
-                                        g = scanlines_buffer.readUInt8(scanline_start + 2 + x * 4);
-                                        b = scanlines_buffer.readUInt8(scanline_start + 3 + x * 4);
-                                        a = scanlines_buffer.readUInt8(scanline_start + 4 + x * 4);
-                                        
-                                        var px = [r, g, b, a];
-                                        //var px = [r, g, b];
-                                        //console.log('px ' + stringify(px));
-                                        
-                                        // then do the unfiltering.
-                                        //var unfiltered
-                                        
-                                        // pixel value above, pixel value to left. Take avg of them.
-                                        
-                                        var pixel_above = [0, 0, 0, 0];
-                                        var r_above = 0;
-                                        var g_above = 0;
-                                        var b_above = 0;
-                                        var a_above = 0;
-                                        
-                                        if (scanline_num > 0) {
-                                            // read pixel from unfiltered scanline above
-                                            //pixel_above = uf_sb_above.readUInt8(c);
-                                            
-                                            r_above = uf_sb_above.readUInt8(x * 4 + 1);
-                                            g_above = uf_sb_above.readUInt8(x * 4 + 2);
-                                            b_above = uf_sb_above.readUInt8(x * 4 + 3);
-                                            a_above = uf_sb_above.readUInt8(x * 4 + 3);
-                                        }
-                                        
-                                        defiltered_r = r + Math.floor((r_above + last_defiltered_px[0]) / 2);
-                                        defiltered_g = g + Math.floor((g_above + last_defiltered_px[1]) / 2);
-                                        defiltered_b = b + Math.floor((b_above + last_defiltered_px[2]) / 2);
-                                        defiltered_a = a + Math.floor((a_above + last_defiltered_px[3]) / 2);
-                                        
-                                        if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                        if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                        if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                        if (defiltered_a > 255) defiltered_a = defiltered_a - 256;
-                                        //if (defiltered_a > 255) defiltered_a = defiltered_r - 256;
-                                        
-                                        var defiltered_px = [defiltered_r, defiltered_g, defiltered_b, defiltered_a];
-                                        
-                                        //console.log('defiltered_px ' + stringify(defiltered_px));
-                                        
-                                        res.writeUInt8(defiltered_r, x * 4 + 1);
-                                        res.writeUInt8(defiltered_g, x * 4 + 2);
-                                        res.writeUInt8(defiltered_b, x * 4 + 3);
-                                        res.writeUInt8(defiltered_a, x * 4 + 4);
-                                        r//es.writeUInt8(defiltered_a, x * 3 + 4);
-                                        
-                                        last_defiltered_px = defiltered_px;
-                                    }
-                                    return res;
-                                    //throw 'currently unsupported';
-                                    
-                                } else {
-                                    throw 'unsupported bit depth with scanline filter';
-                                }
-                            } else {
-                                throw ('unsupported color_type ' + color_type + ' with scanline_filter ' + scanline_filter_byte);
+                            if (b >= bytes_per_pixel) {
+                                byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
                             }
-                            
-                            //throw 'unsupported scanline filter ' + scanline_filter_byte;
-                        } else if (scanline_filter_byte == 4) {
-                            // The Paeth predictor
-                            // Looks left, above, and above and left.
-                            // Like the average filter to start with
-                            
-                            // Need to be able to apply these in the forward direction for encoding too.
-                            
-                            if (color_type == 2) {
-                                if (bit_depth == 8) {
-                                
-                                //console.log('DECODE ct 2 bd 8');
-                                
-                                // go through the values of the scanline, looking at the pixels.
-                                    var res = new Buffer(scanline_length);
-                                    res.writeUInt8(0, 0);
-                                    var last_defiltered_px = [0, 0, 0];
-                                    
-                                    //var num_bytes_per_pixel = 3;
-                                    
-                                    // need to look at the scanline above.
-                                    var uf_sb_above = this.get_unfiltered_scanline_buffer(y - 1);
-                                    
-                                    
-                                    for (var x = 0; x < w; x++) {
-                                        // extract rgb values...
-                                        //  3 bytes
-                                        r = scanlines_buffer.readUInt8(scanline_start + 1 + x * 3);
-                                        g = scanlines_buffer.readUInt8(scanline_start + 2 + x * 3);
-                                        b = scanlines_buffer.readUInt8(scanline_start + 3 + x * 3);
-                                        //var a = scanlines_buffer.readUInt8(scanline_start + 4 + x * 4);
-                                        
-                                        //var px = [r, g, b, a];
-                                        var px = [r, g, b];
-                                        //console.log('px ' + stringify(px));
-                                        
-                                        // then do the unfiltering.
-                                        //var unfiltered
-                                        
-                                        // pixel value above, pixel value to left. Take avg of them.
-                                        
-                                        //var pixel_above = [0, 0, 0];
-                                        var r_above = 0;
-                                        var g_above = 0;
-                                        var b_above = 0;
-                                        if (scanline_num > 0) {
-                                            // read pixel from unfiltered scanline above
-                                            //pixel_above = uf_sb_above.readUInt8(c);
-                                            
-                                            r_above = uf_sb_above.readUInt8(x * 3 + 1);
-                                            g_above = uf_sb_above.readUInt8(x * 3 + 2);
-                                            b_above = uf_sb_above.readUInt8(x * 3 + 3);
-                                        }
-                                        
-                                        //var pixel_above_left = [0, 0, 0];
-                                        var r_above_left = 0;
-                                        var g_above_left = 0;
-                                        var b_above_left = 0;
-                                        
-                                        if (scanline_num > 0 && x > 0) {
-                                            r_above_left = uf_sb_above.readUInt8(x * 3 - 2);
-                                            g_above_left = uf_sb_above.readUInt8(x * 3 - 1);
-                                            b_above_left = uf_sb_above.readUInt8(x * 3);
-                                        }
-                                        
-                                        var p_r = paeth_predictor(last_defiltered_px[0], r_above, r_above_left);
-                                        var p_g = paeth_predictor(last_defiltered_px[1], g_above, g_above_left);
-                                        var p_b = paeth_predictor(last_defiltered_px[2], b_above, b_above_left);
-                                        
-                                        defiltered_r = r + p_r;
-                                        defiltered_g = g + p_g;
-                                        defiltered_b = b + p_b;
-                                        
-                                        /*
-                                        
-                                        var defiltered_r = r + last_defiltered_px[0];
-                                        var defiltered_g = g + last_defiltered_px[1];
-                                        var defiltered_b = b + last_defiltered_px[2];
-                                        var defiltered_a = a + last_defiltered_px[3];
-                                        */
-                                        if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                        if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                        if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                        //if (defiltered_a > 255) defiltered_a = defiltered_r - 256;
-                                        
-                                        var defiltered_px = [defiltered_r, defiltered_g, defiltered_b];
-                                        
-                                        //console.log('defiltered_px ' + stringify(defiltered_px));
-                                        
-                                        res.writeUInt8(defiltered_r, x * 3 + 1);
-                                        res.writeUInt8(defiltered_g, x * 3 + 2);
-                                        res.writeUInt8(defiltered_b, x * 3 + 3);
-                                        r//es.writeUInt8(defiltered_a, x * 3 + 4);
-                                        
-                                        last_defiltered_px = defiltered_px;
-                                    }
-                                    return res;
-                                    
-                                } else {
-                                    throw 'Unsupported bit_depth ' + bit_depth;
-                                }
-                                    
-                                
-                            } else if (color_type == 6) {
-                                if (bit_depth == 8) {
-                                    // decode paeth rgba.
-                                    
-                                    var res = new Buffer(scanline_length);
-                                    res.writeUInt8(0, 0);
-                                    var last_defiltered_px = [0, 0, 0];
-                                    
-                                    //var num_bytes_per_pixel = 3;
-                                    
-                                    // need to look at the scanline above.
-                                    var uf_sb_above = this.get_unfiltered_scanline_buffer(y - 1);
-                                    
-                                    for (var x = 0; x < w; x++) {
-                                        // extract rgb values...
-                                        //  3 bytes
-                                        r = scanlines_buffer.readUInt8(scanline_start + 1 + x * 4);
-                                        g = scanlines_buffer.readUInt8(scanline_start + 2 + x * 4);
-                                        b = scanlines_buffer.readUInt8(scanline_start + 3 + x * 4);
-                                        a = scanlines_buffer.readUInt8(scanline_start + 4 + x * 4);
-                                        
-                                        var px = [r, g, b, a];
-                                        //var px = [r, g, b];
-                                        //console.log('px ' + stringify(px));
-                                        
-                                        // then do the unfiltering.
-                                        //var unfiltered
-                                        
-                                        // pixel value above, pixel value to left. Take avg of them.
-                                        
-                                        //var pixel_above = [0, 0, 0];
-                                        var r_above = 0;
-                                        var g_above = 0;
-                                        var b_above = 0;
-                                        var a_above = 0;
-                                        if (scanline_num > 0) {
-                                            // read pixel from unfiltered scanline above
-                                            //pixel_above = uf_sb_above.readUInt8(c);
-                                            
-                                            r_above = uf_sb_above.readUInt8(x * 4 + 1);
-                                            g_above = uf_sb_above.readUInt8(x * 4 + 2);
-                                            b_above = uf_sb_above.readUInt8(x * 4 + 3);
-                                            a_above = uf_sb_above.readUInt8(x * 4 + 4);
-                                        }
-                                        
-                                        //var pixel_above_left = [0, 0, 0];
-                                        var r_above_left = 0;
-                                        var g_above_left = 0;
-                                        var b_above_left = 0;
-                                        var a_above_left = 0;
-                                        
-                                        if (scanline_num > 0 && x > 0) {
-                                            r_above_left = uf_sb_above.readUInt8(x * 4 - 3);
-                                            g_above_left = uf_sb_above.readUInt8(x * 4 - 2);
-                                            b_above_left = uf_sb_above.readUInt8(x * 4 - 1);
-                                            a_above_left = uf_sb_above.readUInt8(x * 4);
-                                        }
-                                        
-                                        var p_r = paeth_predictor(last_defiltered_px[0], r_above, r_above_left);
-                                        var p_g = paeth_predictor(last_defiltered_px[1], g_above, g_above_left);
-                                        var p_b = paeth_predictor(last_defiltered_px[2], b_above, b_above_left);
-                                        var p_a = paeth_predictor(last_defiltered_px[3], a_above, a_above_left);
-                                        
-                                        defiltered_r = r + p_r;
-                                        defiltered_g = g + p_g;
-                                        defiltered_b = b + p_b;
-                                        defiltered_a = a + p_a;
-                                        
-                                        /*
-                                        
-                                        var defiltered_r = r + last_defiltered_px[0];
-                                        var defiltered_g = g + last_defiltered_px[1];
-                                        var defiltered_b = b + last_defiltered_px[2];
-                                        var defiltered_a = a + last_defiltered_px[3];
-                                        */
-                                        if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                        if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                        if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                        if (defiltered_a > 255) defiltered_a = defiltered_a - 256;
-                                        
-                                        var defiltered_px = [defiltered_r, defiltered_g, defiltered_b, defiltered_a];
-                                        
-                                        //console.log('defiltered_px ' + stringify(defiltered_px));
-                                        
-                                        res.writeUInt8(defiltered_r, x * 4 + 1);
-                                        res.writeUInt8(defiltered_g, x * 4 + 2);
-                                        res.writeUInt8(defiltered_b, x * 4 + 3);
-                                        res.writeUInt8(defiltered_a, x * 4 + 4);
-                                        
-                                        last_defiltered_px = defiltered_px;
-                                    }
-                                    return res;
-                                    //throw 'currently unsupported';
-                                } else {
-                                    throw 'unsupported bit depth with scanline filter';
-                                }
-                            } else {
-                                throw ('unsupported color_type ' + color_type + ' with scanline_filter ' + scanline_filter_byte);
+                            filtered_byte = scanlines_buffer.readUInt8(byte_pos);
+                            unfiltered_byte = filtered_byte + Math.floor((unfiltered_byte_above + unfiltered_byte_left) / 2);
+                            if (unfiltered_byte > 255) unfiltered_byte = unfiltered_byte - 256;
+                            unfiltered_scanlines_buffer.writeUInt8(unfiltered_byte, byte_pos);
+                        }
+                    } else if (scanline_filter_byte == 4) {
+                        //paeth
+                        for (b = 1; b < scanline_length; b++) {
+                            unfiltered_byte_above = 0;
+                            unfiltered_byte_left = 0;
+                            unfiltered_byte_above_left = 0;
+                            byte_pos = scanline_start + b;
+                            if (y > 0) {
+                                byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_above = unfiltered_scanlines_buffer.readUInt8(byte_above_pos);
                             }
-                            throw 'unsupported scanline filter ' + scanline_filter_byte;   
+                            if (b >= bytes_per_pixel) {
+                                byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
+                            }
+                            if (y > 0 && b >= bytes_per_pixel) {
+                                byte_above_left_pos = byte_pos - bytes_per_pixel - scanline_length;
+                                unfiltered_byte_above_left = unfiltered_scanlines_buffer.readUInt8(byte_above_left_pos);
+                            }
+                            filtered_byte = scanlines_buffer.readUInt8(byte_pos);
+                            unfiltered_byte = filtered_byte + paeth_predictor(unfiltered_byte_left, unfiltered_byte_above, unfiltered_byte_above_left);
+                            if (unfiltered_byte > 255) unfiltered_byte = unfiltered_byte - 256;
+                            unfiltered_scanlines_buffer.writeUInt8(unfiltered_byte, byte_pos);
                         }
                     }
-                    return res_buffer;   
-                }    
+                }
+                
+                
+                //throw 'stop';
+                
             },
             
+            // could maybe use an array instead.
             'get_map_scanline_filters': function() {
                 var h = this.size[1], scanline_length = this.scanline_length, scanlines_buffer = this.scanlines_buffer;
                 var res = {};
@@ -905,7 +675,6 @@ PNG compression method 0
             //  could enable changes to pixels
             //  will be used to get pixels into another image.
             
-            
             // 'change_bit_depth'?
             
             // 'change_encoding'?
@@ -913,7 +682,14 @@ PNG compression method 0
             // 'set_encoding'
             
             'iterate_row': function(y, pixel_callback) {
-                var uf_slb = this.get_unfiltered_scanline_buffer(y);
+                //var uf_slb = this.get_unfiltered_scanline_buffer(y);
+                
+                // uses positions on the unfiltered_scanlines_buffer.
+                //console.log('iterate_row');
+                
+                
+                //throw 'stop';
+                //console.log('uf_slb ' + uf_slb);
                 // then depending on bit rate, color depth... but at least we have isolated the unfiltered scanline row with this.
                 //  will use this to keep the low level structure and provide a high level interface.
                 
@@ -925,23 +701,31 @@ PNG compression method 0
                 // different loops for different color modes / bit depths.
                 var r, g, b, px;
                 
+                var _3x, _4x;
+                
+                var unfiltered_row_start_pos = scanline_length * y;
+                
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                //  should have the unfiltered scanlines buffer set up...
+                //   should be a part of loading the png.
+                
+                
                 if (this.color_type == 2) {
                     // rgb
                     
                     if (bit_depth == 8) {
                         // 24 bpp
                         
-                        
                         for (var x = 0; x < w; x++) {
-                            r = uf_slb.readUInt8(x * 3 + 1);
-                            g = uf_slb.readUInt8(x * 3 + 2);
-                            b = uf_slb.readUInt8(x * 3 + 3);
-                            px = [r, g, b];
-                            pixel_callback(x, y, px);
+                            _3x = x * 3;
+                            r = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 1);
+                            g = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 2);
+                            b = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 3);
+                            //px = [r, g, b];
+                            //pixel_callback(x, y, px);
+                            pixel_callback(x, y, r, g, b);
                         }
                         // read the pixel values.
-                    
-                    
                     
                     } else {
                         throw 'Unsupported bit_depth ' + bit_depth;
@@ -956,14 +740,17 @@ PNG compression method 0
                     
                     if (bit_depth == 8) {
                         // 24 bpp
+                        var _4x;
                         
                         for (var x = 0; x < w; x++) {
-                            r = uf_slb.readUInt8(x * 4 + 1);
-                            g = uf_slb.readUInt8(x * 4 + 2);
-                            b = uf_slb.readUInt8(x * 4 + 3);
-                            a = uf_slb.readUInt8(x * 4 + 4);
-                            px = [r, g, b, a];
-                            pixel_callback(x, y, px);
+                            _4x = 4 * x;
+                            r = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 1);
+                            g = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 2);
+                            b = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 3);
+                            a = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 4);
+                            //px = [r, g, b, a];
+                            //pixel_callback(x, y, px);
+                            pixel_callback(x, y, r, g, b, a);
                         }
                         // read the pixel values.
                     
@@ -977,138 +764,182 @@ PNG compression method 0
                 
             },
             
+            
+            // when we have the unfiltered buffer, want to run filtering from it.
+            
             // Need to refilter the rows.
             //  A pixel value may get chganged, or the filter used on a row could change.
             
-            'filter_all_scanlines': function() {
-                var h = this.size[1];
-                for (var y = 0; y < h; y++) {
-                    this.filter_scanline(y);
+            'analyse_scanline_filter_method_get_compressed_size': fp(function(a, sig) {
+                // this function could be remade so that it gets compressed filter sizes for all of the different scanline filtering options,
+                
+                
+                
+                var scanline_num, scanline_filter_byte, options = {}, callback;
+                
+                //console.log('sig ' + sig);
+                
+                if (sig == '[n,n]') {
+                    scanline_num = a[0];
+                    scanline_filter_byte = a[1];
                 }
                 
-            },
-            
-            // The scanline rows will have the filters built in.
-            
-            'filter_scanline': function(scanline_num) {
-                var scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
-                var scanlines_buffer = this.scanlines_buffer;
+                if (sig == '[n,n,f]') {
+                    scanline_num = a[0];
+                    scanline_filter_byte = a[1];
+                    callback = a[2];
+                }
                 
-                var scanline_start = this.scanline_length * scanline_num;
+                if (sig == '[n,n,o,f]') {
+                    scanline_num = a[0];
+                    scanline_filter_byte = a[1];
+                    options = a[2];
+                    callback = a[3];
+                }
+                
+                //console.log('scanline_num ' + scanline_num);
+                
+                //unique_2grams
+                //var method = 'deflate';
+                //var method = 'unique_2grams';
+                var method = 'unique_4grams';
+                
+                if (options) {
+                    if (options.method) method = options.method;
+                    if (options.filter_method) method = options.filter_method;
+                }
+                
+                //  [n,n,f]
+                
+                // could have options in there.
+                
+                // there will be different optimization methods.
+                //   these are all scanline-local.
+                
+                // deflate, unique_4_byte_words
+                
+                // creates a compressed version of the scanline to see how big it is when defalted.
+                
+                //  like filter_scanline, but we want to write it to a separate individual scanline buffer.
+                
+                //console.log('this.scanline_length ' + this.scanline_length);
+                
+                this.analysis_scanline_buffer = this.analysis_scanline_buffer || new Buffer(this.scanline_length);
+                
+                if (this.analysis_scanline_buffer.length != this.scanline_length) this.analysis_scanline_buffer = new Buffer(this.scanline_length);
+                
+                // can use different analysis methods.
+                //  may try looking at 4-byte sequences read by readUInt32.
+                //   counting the numbers of unique ones.
+                //    and choosing the scanline filter that produces the lowest number of unique 4 byte sequences.
+                
+                
+                //var scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
+                
+                var scanlines_buffer = this.scanlines_buffer;
+                var scanline_length = this.scanline_length;
+                var scanline_start = scanline_length * scanline_num;
+                
+                var analysis_scanline_buffer = this.analysis_scanline_buffer;
+                
+                var color_type = this.color_type;
                 
                 //console.log('filter_scanline ' + scanline_num + ' scanline_filter_byte: ' + scanline_filter_byte);
                 
-                var filtered_r, filtered_g, filtered_b, filtered_a;
+                
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                
+                var bytes_per_pixel = -1;
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        bytes_per_pixel = 3;
+                    }
+                    if (color_type == 6) {
+                        bytes_per_pixel = 4;
+                    }
+                }
+                
+                var byte_pos;
+                
+                var unfiltered_byte;
+                var filtered_byte;
+                var unfiltered_byte_value_above;
+                
+                var unfiltered_byte_value_left;
+                var unfiltered_byte_value_above_left;
+                //console.log('scanline_filter_byte ' + scanline_filter_byte);
+                
+                // filtering individual scanlines could make sense if something changes and only affects things below it.
+                //  or below it until a line with filter 0 or 1 is reached.
+                
+                // write to 5 analysis buffers at once?
+                // or write to 5 different queue-like things.
+                //  revolving data structures that forget previous items that were put in?
+                //   I think an array with a pointer would work well. That way we can read back however many items, and see if that combination has hapenned before,
+                //    working out unique-ngram occurrances.
+                
+                // local ngram analysis may turn out to be a good method...
+                //  may not need to hold the whole scanline.
+                
+                // deflate on each line seems best for the moment though.
+                
+                // best option at the moment is the scanline deflate test?
+                
+                // taking into consideration previous lines will help as well.
+                
+                
+                
+                
+                if (scanline_filter_byte == 0) {
+                    // just copy it over to the scanlines_buffer
+                    
+                    // not sure if something needs to be done here... maybe.
+                    
+                    // copy from unfiltered buffer to filtered buffer.
+                    //this.unfiltered_scanlines_buffer
+                    //console.log('this.unfiltered_scanlines_buffer ' + this.unfiltered_scanlines_buffer);
+                    unfiltered_scanlines_buffer.copy(analysis_scanline_buffer, 0, scanline_start, scanline_start + this.scanline_length);
+                    
+                    // it is the unfiltered value?
+                    //  where do we get the various values from at this stage?
+                    
+                    
+                    
+                    
+                }
                 
                 if (scanline_filter_byte == 1) {
-                    // it's the 'left' filter.
-                    if (this.color_type == 2) {
-                        if (this.bit_depth == 8) {
-                            var left_unfiltered_px = [0, 0, 0];
-                            this.iterate_row(scanline_num, function(x, y, unfiltered_px) {
-                                // write the pixel to the scanlines_buffer.
-                                //console.log('iterating x, y, unfiltered_px ' + x + ', ' + y + ', ' + unfiltered_px)
-                                // calculate the filtered_px or filtered px values.
-                                
-                                filtered_r = unfiltered_px[0] - left_unfiltered_px[0];
-                                filtered_g = unfiltered_px[1] - left_unfiltered_px[1];
-                                filtered_b = unfiltered_px[2] - left_unfiltered_px[2];
-                                
-                                if (filtered_r < 0) filtered_r = filtered_r + 256;
-                                if (filtered_g < 0) filtered_g = filtered_g + 256;
-                                if (filtered_b < 0) filtered_b = filtered_b + 256;
-                                
-                                scanlines_buffer.writeUInt8(filtered_r, scanline_start + 1 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_g, scanline_start + 2 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_b, scanline_start + 3 + x * 3)
-                                
-                                //scanlines_buffer.write
-                                left_unfiltered_px = unfiltered_px;
-                            });
-                        } else {
-                            throw 'Unsupported bit depth ' + this.bit_depth;
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_left = 0;
+                            if (b >= bytes_per_pixel) {
+                                //var byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                            }
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            filtered_byte = unfiltered_byte - unfiltered_byte_value_left;
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            analysis_scanline_buffer.writeUInt8(filtered_byte, byte_pos - scanline_start);
                         }
-                    } else if (this.color_type == 6) {
-                        //throw 'stopping';
-                        if (this.bit_depth == 8) {
-                            var left_unfiltered_px = [0, 0, 0, 0];
-                            this.iterate_row(scanline_num, function(x, y, unfiltered_px) {
-                                // write the pixel to the scanlines_buffer.
-                                //console.log('iterating x, y, unfiltered_px ' + x + ', ' + y + ', ' + unfiltered_px)
-                                // calculate the filtered_px or filtered px values.
-                                
-                                filtered_r = unfiltered_px[0] - left_unfiltered_px[0];
-                                filtered_g = unfiltered_px[1] - left_unfiltered_px[1];
-                                filtered_b = unfiltered_px[2] - left_unfiltered_px[2];
-                                filtered_a = unfiltered_px[3] - left_unfiltered_px[3];
-                                
-                                if (filtered_r < 0) filtered_r = filtered_r + 256;
-                                if (filtered_g < 0) filtered_g = filtered_g + 256;
-                                if (filtered_b < 0) filtered_b = filtered_b + 256;
-                                if (filtered_a < 0) filtered_a = filtered_a + 256;
-                                
-                                scanlines_buffer.writeUInt8(filtered_r, scanline_start + 1 + x * 4)
-                                scanlines_buffer.writeUInt8(filtered_g, scanline_start + 2 + x * 4)
-                                scanlines_buffer.writeUInt8(filtered_b, scanline_start + 3 + x * 4)
-                                scanlines_buffer.writeUInt8(filtered_a, scanline_start + 4 + x * 4)
-                                
-                                //scanlines_buffer.write
-                                left_unfiltered_px = unfiltered_px;
-                            });
-                        } else {
-                            throw 'Unsupported bit depth ' + this.bit_depth;
-                        }
-                    } else {
-                        throw 'unsupported color_type';
                     }
                 }
                 
                 if (scanline_filter_byte == 2) {
-                    // it's the 'left' filter.
-                    if (this.color_type == 2) {
-                        if (this.bit_depth == 8) {
-                            var left_unfiltered_px = [0, 0, 0];
-                            
-                            // need the unfiltered scanline above.
-                            //  or the unfiltered pixels above?
-                            
-                            var unfiltered_scanline_above_buffer;
-                            
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_above = 0;
                             if (scanline_num > 0) {
-                                unfiltered_scanline_above_buffer = this.get_unfiltered_scanline_buffer(scanline_num - 1);
+                                //var byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
                             }
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            filtered_byte = unfiltered_byte - unfiltered_byte_value_above;
                             
-                            this.iterate_row(scanline_num, function(x, y, unfiltered_px) {
-                                // write the pixel to the scanlines_buffer.
-                                console.log('iterating x, y, unfiltered_px ' + x + ', ' + y + ', ' + unfiltered_px)
-                                // calculate the filtered_px or filtered px values.
-                                
-                                var unfiltered_above_px = [0, 0, 0];
-                                if (unfiltered_scanline_above_buffer) {
-                                    //unfiltered_above_px = 
-                                    var ufa_r = unfiltered_scanline_above_buffer.readUInt8(1 + x * 3);
-                                    var ufa_g = unfiltered_scanline_above_buffer.readUInt8(2 + x * 3);
-                                    var ufa_b = unfiltered_scanline_above_buffer.readUInt8(3 + x * 3);
-                                    unfiltered_above_px = [ufa_r, ufa_g, ufa_b];
-                                }
-                                
-                                filtered_r = unfiltered_px[0] - unfiltered_above_px[0];
-                                filtered_g = unfiltered_px[1] - unfiltered_above_px[1];
-                                filtered_b = unfiltered_px[2] - unfiltered_above_px[2];
-                                
-                                if (filtered_r < 0) filtered_r = filtered_r + 256;
-                                if (filtered_g < 0) filtered_g = filtered_g + 256;
-                                if (filtered_b < 0) filtered_b = filtered_b + 256;
-                                
-                                scanlines_buffer.writeUInt8(filtered_r, scanline_start + 1 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_g, scanline_start + 2 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_b, scanline_start + 3 + x * 3)
-                                
-                                //scanlines_buffer.write
-                                left_unfiltered_px = unfiltered_px;
-                            });
-                        } else {
-                            throw 'Unsupported bit depth ' + this.bit_depth;
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            analysis_scanline_buffer.writeUInt8(filtered_byte, byte_pos - scanline_start);
                         }
                     }
                 }
@@ -1117,50 +948,26 @@ PNG compression method 0
                     // it's the 'average' filter.
                     // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
                     
-                    if (this.color_type == 2) {
-                        if (this.bit_depth == 8) {
-                            var left_unfiltered_px = [0, 0, 0];
-                            
-                            // need the unfiltered scanline above.
-                            //  or the unfiltered pixels above?
-                            
-                            var unfiltered_scanline_above_buffer;
-                            
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            //var byte_value_above = 0;
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_above = 0;
                             if (scanline_num > 0) {
-                                unfiltered_scanline_above_buffer = this.get_unfiltered_scanline_buffer(scanline_num - 1);
+                                var byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_above_pos);
+                            }
+                            unfiltered_byte_value_left = 0;
+                            if (b >= bytes_per_pixel) {
+                                var byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
                             }
                             
-                            this.iterate_row(scanline_num, function(x, y, unfiltered_px) {
-                                // write the pixel to the scanlines_buffer.
-                                //console.log('iterating x, y, unfiltered_px ' + x + ', ' + y + ', ' + unfiltered_px)
-                                // calculate the filtered_px or filtered px values.
-                                
-                                var unfiltered_above_px = [0, 0, 0];
-                                if (unfiltered_scanline_above_buffer) {
-                                    //unfiltered_above_px = 
-                                    var ufa_r = unfiltered_scanline_above_buffer.readUInt8(1 + x * 3);
-                                    var ufa_g = unfiltered_scanline_above_buffer.readUInt8(2 + x * 3);
-                                    var ufa_b = unfiltered_scanline_above_buffer.readUInt8(3 + x * 3);
-                                    unfiltered_above_px = [ufa_r, ufa_g, ufa_b];
-                                }
-                                
-                                filtered_r = unfiltered_px[0] - Math.floor((left_unfiltered_px[0] + unfiltered_above_px[0]) / 2);
-                                filtered_g = unfiltered_px[1] - Math.floor((left_unfiltered_px[1] + unfiltered_above_px[1]) / 2);
-                                filtered_b = unfiltered_px[2] - Math.floor((left_unfiltered_px[2] + unfiltered_above_px[2]) / 2);
-                                
-                                if (filtered_r < 0) filtered_r = filtered_r + 256;
-                                if (filtered_g < 0) filtered_g = filtered_g + 256;
-                                if (filtered_b < 0) filtered_b = filtered_b + 256;
-                                
-                                scanlines_buffer.writeUInt8(filtered_r, scanline_start + 1 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_g, scanline_start + 2 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_b, scanline_start + 3 + x * 3)
-                                
-                                //scanlines_buffer.write
-                                left_unfiltered_px = unfiltered_px;
-                            });
-                        } else {
-                            throw 'Unsupported bit depth ' + this.bit_depth;
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            filtered_byte = unfiltered_byte - Math.floor((unfiltered_byte_value_left + unfiltered_byte_value_above) / 2);;
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            analysis_scanline_buffer.writeUInt8(filtered_byte, byte_pos - scanline_start);
                         }
                     }
                 }
@@ -1169,71 +976,1290 @@ PNG compression method 0
                     // it's the 'paeth' filter.
                     // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
                     
-                    if (this.color_type == 2) {
-                        if (this.bit_depth == 8) {
-                            var left_unfiltered_px = [0, 0, 0];
+                    var has_left, has_above;
+                    
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_above = 0;
+                            has_left = b >= bytes_per_pixel;
+                            has_above = scanline_num > 0;
                             
-                            // need the unfiltered scanline above.
-                            //  or the unfiltered pixels above?
-                            
-                            var unfiltered_scanline_above_buffer;
-                            
-                            if (scanline_num > 0) {
-                                unfiltered_scanline_above_buffer = this.get_unfiltered_scanline_buffer(scanline_num - 1);
+                            if (has_above) {
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
+                            }
+                            unfiltered_byte_value_left = 0;
+                            if (has_left) {
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                            }
+                            unfiltered_byte_value_above_left = 0;
+                            if (has_left && has_above) {
+                                unfiltered_byte_value_above_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length - bytes_per_pixel);
                             }
                             
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
                             
-                            this.iterate_row(scanline_num, function(x, y, unfiltered_px) {
-                                // write the pixel to the scanlines_buffer.
-                                console.log('iterating x, y, unfiltered_px ' + x + ', ' + y + ', ' + unfiltered_px)
-                                // calculate the filtered_px or filtered px values.
-                                
-                                var unfiltered_above_px = [0, 0, 0];
-                                var unfiltered_above_left_px = [0, 0, 0];
-                                if (unfiltered_scanline_above_buffer) {
-                                    //unfiltered_above_px = 
-                                    var ufa_r = unfiltered_scanline_above_buffer.readUInt8(1 + x * 3);
-                                    var ufa_g = unfiltered_scanline_above_buffer.readUInt8(2 + x * 3);
-                                    var ufa_b = unfiltered_scanline_above_buffer.readUInt8(3 + x * 3);
-                                    unfiltered_above_px = [ufa_r, ufa_g, ufa_b];
-                                    
-                                    if (x > 0) {
-                                        var ufal_r = unfiltered_scanline_above_buffer.readUInt8(-2 + x * 3);
-                                        var ufal_g = unfiltered_scanline_above_buffer.readUInt8(-1 + x * 3);
-                                        var ufal_b = unfiltered_scanline_above_buffer.readUInt8(x * 3);
-                                        unfiltered_above_left_px = [ufal_r, ufal_g, ufal_b];
-                                    }
-                                    
-                                }
-                                
-                                // then use Paeth.
-                                // Paeth(x) = Raw(x) - PaethPredictor(Raw(x-bpp), Prior(x), Prior(x-bpp))
-                                
-                                var p_r = paeth_predictor(left_unfiltered_px[0], unfiltered_above_px[0], unfiltered_above_left_px[0]);
-                                var p_g = paeth_predictor(left_unfiltered_px[1], unfiltered_above_px[1], unfiltered_above_left_px[1]);
-                                var p_b = paeth_predictor(left_unfiltered_px[2], unfiltered_above_px[2], unfiltered_above_left_px[2]);
-                                
-                                filtered_r = unfiltered_px[0] - p_r;
-                                filtered_g = unfiltered_px[1] - p_g;
-                                filtered_b = unfiltered_px[2] - p_b;
-                                
-                                if (filtered_r < 0) filtered_r = filtered_r + 256;
-                                if (filtered_g < 0) filtered_g = filtered_g + 256;
-                                if (filtered_b < 0) filtered_b = filtered_b + 256;
-                                
-                                scanlines_buffer.writeUInt8(filtered_r, scanline_start + 1 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_g, scanline_start + 2 + x * 3)
-                                scanlines_buffer.writeUInt8(filtered_b, scanline_start + 3 + x * 3)
-                                
-                                //scanlines_buffer.write
-                                left_unfiltered_px = unfiltered_px;
-                            });
+                            filtered_byte = unfiltered_byte - paeth_predictor(unfiltered_byte_value_left, unfiltered_byte_value_above, unfiltered_byte_value_above_left);
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            analysis_scanline_buffer.writeUInt8(filtered_byte, byte_pos - scanline_start);
+                        }
+                    }
+                }
+                
+                
+                // then we compress the analysis scanlines buffer, and see how big it is.
+                //console.log('analysis_scanline_buffer ' + this.analysis_scanline_buffer);
+                //console.log('analysis_scanline_buffer.length ' + this.analysis_scanline_buffer.length);
+                
+                // could use lower deflate level... but the time is likely coming from making all these buffers. Don't think it can be helped with deflate (here).
+                //  could maybe push the deflated chunk to a scratch buffer?
+                //  maybe this will just be a bit slow for the moment.
+                
+                if (method == 'deflate') {
+                    var deflate = zlib.createDeflate({
+                        chunkSize: 32 * 1024,
+                        level: 9,
+                        strategy: 3,
+                        windowBits: 15,
+                        memLevel: 9
+                    });
+                    //deflate.on('error', this.emit.bind(this, 'error'));
+                    deflate.on('error', function() {
+                        console.log('deflate error');
+                    });
+            
+                    //var buffers = [];
+                    var nread = 0;
+                
+                    var that = this;
+                
+                    deflate.on('data', function(chunk) {
+                        nread = nread + chunk.length;
+                    });
+                    deflate.on('end', function() {
+                        callback(null, nread);
+                    });
+                    deflate.end(this.analysis_scanline_buffer);
+                } else if (method == 'unique_2grams') {
+                    // go through the analysis buffer.
+                    var map_found_2grams = {};
+                    var filtered_2gram;
+                    var count_unique = 0;
+                    
+                    //console.log('unique_2grams ');
+                    // it's doing this through loads of callbacks... not sure that's the best way.
+                    //  especially as no callback is needed for the 2-gram analysis.
+                    
+                    for (var b = 0; b < scanline_length - 1; b++) {
+                        //console.log('b ' + b);
+                        filtered_2gram = analysis_scanline_buffer.readUInt16BE(b);
+                        if (map_found_2grams[filtered_2gram]) {
+                        
                         } else {
-                            throw 'Unsupported bit depth ' + this.bit_depth;
+                            map_found_2grams[filtered_2gram] = true;
+                            count_unique++;
+                        }
+                    }
+                    
+                    //scanline_filter_byte
+                    //console.log('scanline_filter_byte ' + scanline_filter_byte);
+                    //console.log('count_unique ' + count_unique);
+                    //callback(null, count_unique);
+                    
+                    return count_unique;
+                    
+                } else if (method == 'unique_4grams') {
+                    // go through the analysis buffer.
+                    
+                    // 4grams seem like not the best method.
+                    //  would also be able to track the 4grams in an efficient way when going through all of the unfiltered scanline...
+                    //   also would not need to write to an analysis buffer.
+                    //   would have good local optimization.
+                    
+                    // want something faster, some kind of n-grams, an array or buffer? Build up some kind of data structure quickly while going through the list?
+                    //  want to check compressibility, quickly.
+                    
+                    // may also want something for going through the whole PNG.
+                    //  deflate needs to be done asyncronously.
+                    
+                    
+                    
+                    
+                    
+                    
+                    var map_found_4grams = {};
+                    var filtered_4gram;
+                    var count_unique = 0;
+                    
+                    //console.log('unique_2grams ');
+                    // it's doing this through loads of callbacks... not sure that's the best way.
+                    //  especially as no callback is needed for the 2-gram analysis.
+                    
+                    for (var b = 0; b < scanline_length - 3; b++) {
+                        //console.log('b ' + b);
+                        filtered_4gram = analysis_scanline_buffer.readUInt32BE(b);
+                        if (map_found_4grams[filtered_4gram]) {
+                        
+                        } else {
+                            map_found_4grams[filtered_4gram] = true;
+                            count_unique++;
+                        }
+                    }
+                    
+                    //scanline_filter_byte
+                    //console.log('scanline_filter_byte ' + scanline_filter_byte);
+                    //console.log('count_unique ' + count_unique);
+                    //callback(null, count_unique);
+                    
+                    return count_unique;
+                    
+                }
+                
+                
+                
+                
+            }),
+            
+            // want to set the scanline filters based on analysis.
+            // also optimize and save.
+            
+            // doing the filtering with all of the filter options each time takes some cpu resources.
+            //  could make an analysis module that calculates all of the possible filtered scanlines at once, in a more optimized way.
+            
+            
+            // there can be different methods of doing this.
+            
+            // scanline_deflate being one predictor.
+            //  I may make a better one sometime that takes into account previously encoded data.
+            
+            
+            'optimize_scanline_filters': fp(function(a, sig) {
+                var options = {}, callback;
+                if (sig == '[f]') {
+                    callback = a[0];
+                }
+                if (sig == '[o,f]') {
+                    options = a[0];
+                    callback = a[1];
+                }
+                
+                // and there will be different optimization methods.
+                
+                var method = 'deflate';
+                if (options.method) {
+                    method = options.method;
+                }
+                
+                // this can work in async mode with deflate.
+                //  other methods were not working in async as I had them, nicer to have in sync when it's JS code running anyway.
+                //  will be calling some methods as both sync and async.
+                var that = this;
+                
+                if (method == 'deflate') {
+                    console.log('deflate analyse_scanlines_predict_best_filters ');
+                    that.analyse_scanlines_predict_best_filters({'method': method}, function(err, arr_predicted_best_scanline_filters) {
+                        if (err) {
+                            throw err;
+                        } else {
+                            each(arr_predicted_best_scanline_filters, function(y, predicted_best_filter) {
+                                that.set_scanline_filter_byte(y, predicted_best_filter);
+                            });
+                        
+                            callback(null, true);
+                        }
+                    
+                    });
+                } else {
+                    var arr_predicted_best_scanline_filters = that.analyse_scanlines_predict_best_filters({'method': method});
+                    each(arr_predicted_best_scanline_filters, function(y, predicted_best_filter) {
+                        that.set_scanline_filter_byte(y, predicted_best_filter);
+                    });
+                
+                    if (callback) {
+                        callback(null, true);
+                    } else {
+                        return true;
+                    }
+                }
+            }),
+            
+            'analyse_scanlines_predict_best_filters': fp(function(a, sig) {
+                // do the analysis on a whole bunch of them.
+                //  the optimizing set scanline filters works better.
+                //   the 'best' optimization works really well.
+                //   don't think the compression takes long.
+                //    uses more cpu and memory though.
+                
+                
+                // inlining the prediction could speed things up.
+                //  perhaps having some deflate javascript code as well, may be faster for small deflations.
+                
+                // asyncronous methods: deflate.
+                
+                //console.log('analyse_scanlines_predict_best_filters sig ' + sig);
+                
+                var options = {}, callback;
+                if (sig == '[o]') {
+                    options = a[0];
+                }
+                if (sig == '[f]') {
+                    callback = a[0];
+                }
+                if (sig == '[o,f]') {
+                    options = a[0];
+                    callback = a[1];
+                }
+                
+                // and there will be different optimization methods.
+                
+                var method = 'deflate';
+                if (options.method) {
+                    method = options.method;
+                }
+                
+                
+                if (method == 'deflate') {
+                    var fns = Fns();
+                
+                    // there may be too many of them for this kind of callback look.
+                
+                    for (var y = 0; y < this.size[1]; y++) {
+                        //fns.push()
+                        fns.push([this, this.analyse_scanline_predict_best_filter, [y, {'method': method}]]);
+                    }
+                
+                    // but not calling these with a callback?
+                    //console.log('pre go');
+                    fns.go(function(err, res_scanlines_predicted_best_filters) {
+                        if (err) {
+                            throw err;
+                        } else {
+                            //console.log('res_scanlines_predicted_best_filters ' + stringify(res_scanlines_predicted_best_filters));
+                            callback(null, res_scanlines_predicted_best_filters);
+                        }
+                    });
+                
+                } else {
+                    var res = [];
+                
+                    for (var y = 0; y < this.size[1]; y++) {
+                        res.push(this.analyse_scanline_predict_best_filter(y, method));
+                    }
+                    return res;
+                }
+                
+                /*
+                
+                */
+                
+                
+                
+            }),
+            
+            
+            // The scanline rows will have the filters built in.
+            //  functions with an optional callback depending on how they were used?
+            // Too many callbacks in a loop has caused problems.
+            
+            // I may need to get used to some functions returning values in some modes of operation.
+            
+            // I think...
+            //  filter scanlines with optimization.
+            //  filtering and optimization go together.
+            
+            // will have the simplest optimization method - looking for the recurring 2 byte values.
+            //  larger recurrances too could maybe be looked for in that same algorithm? or modifications of it.
+            
+            // also want to go through, with the latest 32K of data for each scanline, see which makes the smallest total.
+            //  That's (something like) the incremental filter selection.
+            //  That will be the best method I think.
+            //  Would also be able to test the individual filtered scanlines.
+            
+            
+            
+            
+            
+            // this only is good locally... still makes pretty good results though.
+            //  will do an iterative-look-back filter selection.
+            
+            'analyse_scanline_predict_best_filter': fp(function(a, sig) {
+                // this could take an analysis method parameter.
+                //  more analysis methods could be added in time.
+                
+                // scanline_num, callback
+                var scanline_num, callback;
+                // but could take an analysis method.
+                
+                var options = {};
+                
+                // still local scanline analysis.
+                //  going through the whole unfiltered scanline(s) buffer,
+                //  filtering it to each of the filters, putting that in a short-term buffer or array (maybe going back 10), tracking if all the n-grams have occurred before,
+                //  then continuing through.
+                
+                // Going through the whole image choosing filters based on ngrams, and a larger window using previously selected filters may work very well indeed.
+                // A small ngram sliding window system (maybe very small, looking at 2,3,4 grams may be really good).
+                //  Could probably get a fair performance improvement with one loop.
+                //  Or could move on to the next problem.
+                
+                
+                //console.log('analyse_scanline_predict_best_filter sig ' + sig);
+                
+                if (sig == '[n]') {
+                    scanline_num = a[0];
+                }
+                if (sig == '[n,o]') {
+                    scanline_num = a[0];
+                    options = a[1];
+                }
+                if (sig == '[n,f]') {
+                    scanline_num = a[0];
+                    callback = a[1];
+                }
+                if (sig == '[n,o,f]') {
+                    scanline_num = a[0];
+                    options = a[1];
+                    callback = a[2];
+                }
+                
+                var method = 'deflate';
+                if (options.method) method = options.method;
+            
+                // needs to build filtered versions of the scanline to see how big they are when compressed.
+                //  
+                
+                // do this for the various filters...
+                
+                var fns = Fns();
+                
+                // there will be different filter prediction methods.
+                // but we can use a different method.
+                //  looking at the 2-grams.
+                
+                // but these functions now don't have a callback, they return a result.
+                
+                if (method == 'deflate') {
+                    // it's asyncronous.
+                    
+                    // but reading through the scanline into 5 buffers at once, decoding it, re-using access to buffer variables, I could get faster fitering and deflating.
+                    
+                    //fns.push([this.analyse_scanline_filter_method_get_compressed_size, this, [scanline_num, 1]]);
+                    fns.push([this, this.analyse_scanline_filter_method_get_compressed_size, [scanline_num, 0, {'method': method}]]);
+                    fns.push([this, this.analyse_scanline_filter_method_get_compressed_size, [scanline_num, 1, {'method': method}]]);
+                    fns.push([this, this.analyse_scanline_filter_method_get_compressed_size, [scanline_num, 2, {'method': method}]]);
+                    fns.push([this, this.analyse_scanline_filter_method_get_compressed_size, [scanline_num, 3, {'method': method}]]);
+                    fns.push([this, this.analyse_scanline_filter_method_get_compressed_size, [scanline_num, 4, {'method': method}]]);
+                    
+                    // these could go in parallel (I think), with deflation working in parallel.
+                    
+                    fns.go(function(err, multi_cb) {
+                        //console.log('multi_cb ' + stringify(multi_cb));
+                        //throw 'deflate stop';
+                    
+                        var min = Infinity;
+                        var iMin = -1;
+                    
+                        each(multi_cb, function(i, v) {
+                            if (v < min) {
+                                min = v;
+                                iMin = i;
+                            }
+                        });
+                    
+                        callback(null, iMin);
+                    
+                    });
+                    
+                    
+                } else {
+                    var res = [];
+                
+                    for (var c = 0; c < 5; c++) {
+                        res.push(this.analyse_scanline_filter_method_get_compressed_size(scanline_num, c));
+                    }
+                
+                    var min = Infinity;
+                    var iMin = -1;
+                
+                    each(res, function(i, v) {
+                        if (v < min) {
+                            min = v;
+                            iMin = i;
+                        }
+                    });
+                
+                    //callback(null, iMin);
+                    return iMin;
+                    
+                }
+                
+            }),
+            
+            // analysis on all scanlines to get the filters to set them to.
+            
+            
+            // want to do this, filtering all scanlines in one function.
+            //  should be a bit more efficient.
+            //  will also enable an optimizing filter to go through, choosing what is the best filter to use in each case, looking back on previous
+            //  scanlines when carrying out the deflate.
+            
+            
+            
+            
+            // using the filter found there, basing it on the unfiltered scanlines buffer.
+            
+            'filter_scanline': function(scanline_num) {
+                
+                // want to do an optimizing filtration...
+                //  or at least set the scanline filters optimally.
+                //  it will run deflate on the scanline with the various options to see which produces the best result.
+                //   so for analysis purposes, we will need to get the unfiltered scanline.
+                //    that could be slower. maybe there will be a scanline_analysis_buffer that sticks to the object.
+                //    that would be faster. would make concurrency problems if two functions were to use it at once.
+                //     the compression is async.
+                
+                
+                
+                
+                
+                // and can put this inline in filter all scanlines as well.
+                //  that would likely wind up being faster.
+                
+                
+                var scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
+                
+                var scanlines_buffer = this.scanlines_buffer;
+                var scanline_length = this.scanline_length;
+                var scanline_start = scanline_length * scanline_num;
+                
+                
+                var color_type = this.color_type;
+                
+                //console.log('filter_scanline ' + scanline_num + ' scanline_filter_byte: ' + scanline_filter_byte);
+                
+                
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                
+                var bytes_per_pixel = -1;
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        bytes_per_pixel = 3;
+                    }
+                    if (color_type == 6) {
+                        bytes_per_pixel = 4;
+                    }
+                }
+                
+                var byte_pos;
+                
+                var unfiltered_byte;
+                var filtered_byte;
+                var unfiltered_byte_value_above;
+                
+                var unfiltered_byte_value_left;
+                var unfiltered_byte_value_above_left;
+                //console.log('scanline_filter_byte ' + scanline_filter_byte);
+                
+                // filtering individual scanlines could make sense if something changes and only affects things below it.
+                //  or below it until a line with filter 0 or 1 is reached.
+                
+                
+                if (scanline_filter_byte == 0) {
+                    // just copy it over to the scanlines_buffer
+                    
+                    // not sure if something needs to be done here... maybe.
+                    
+                    // copy from unfiltered buffer to filtered buffer.
+                    //this.unfiltered_scanlines_buffer
+                    //console.log('this.unfiltered_scanlines_buffer ' + this.unfiltered_scanlines_buffer);
+                    //this.unfiltered_scanlines_buffer.copy(scanlines_buffer, scanline_start, scanline_start, scanline_start + this.scanline_length);
+                }
+                
+                if (scanline_filter_byte == 1) {
+                    // it's the 'left' filter.
+                    
+                    //console.log('color_type ' + color_type);
+                    
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            //var byte_value_above = 0;
+                            byte_pos = scanline_start + b;
+                            
+                            unfiltered_byte_value_left = 0;
+                            if (b >= bytes_per_pixel) {
+                                //var byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                            }
+                            // and we should have that unfiltered byte.
+                            
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            filtered_byte = unfiltered_byte - unfiltered_byte_value_left;
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                        }
+                    }
+                }
+                
+                if (scanline_filter_byte == 2) {
+                    // it's the 'above' filter.
+                    
+                    // can make this much more concise by having it go through it byte by byte.
+                    // too much code here right now.
+                    
+                    // will get values from the unfiltered_scanlines_buffer, and will use buffer offsets.
+                    
+                    // reads from unfiltered scanline buffer.
+                    
+                    //console.log('color_type ' + color_type);
+                    
+                    if (color_type == 2 || color_type == 6) {
+                        
+                        for (var b = 1; b < scanline_length; b++) {
+                            //var byte_value_above = 0;
+                            byte_pos = scanline_start + b;
+                            
+                            unfiltered_byte_value_above = 0;
+                            if (scanline_num > 0) {
+                                //var byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
+                            }
+                            
+                            // and we should have that unfiltered byte.
+                            
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            filtered_byte = unfiltered_byte - unfiltered_byte_value_above;
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            
+                            scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                        }
+                    }
+                }
+                
+                if (scanline_filter_byte == 3) {
+                    // it's the 'average' filter.
+                    // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
+                    
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            //var byte_value_above = 0;
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_above = 0;
+                            if (scanline_num > 0) {
+                                var byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_above_pos);
+                            }
+                            unfiltered_byte_value_left = 0;
+                            if (b >= bytes_per_pixel) {
+                                var byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
+                            }
+                            // and we should have that unfiltered byte.
+                            
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            filtered_byte = unfiltered_byte - Math.floor((unfiltered_byte_value_left + unfiltered_byte_value_above) / 2);;
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                        }
+                        
+                    }
+                    
+                }
+                
+                if (scanline_filter_byte == 4) {
+                    // it's the 'paeth' filter.
+                    // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
+                    
+                    var has_left, has_above;
+                    
+                    if (color_type == 2 || color_type == 6) {
+                        for (var b = 1; b < scanline_length; b++) {
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_above = 0;
+                            has_left = b >= bytes_per_pixel;
+                            has_above = scanline_num > 0;
+                            
+                            if (has_above) {
+                                //var byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
+                            }
+                            unfiltered_byte_value_left = 0;
+                            if (has_left) {
+                                //var byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                            }
+                            unfiltered_byte_value_above_left = 0;
+                            if (has_left && has_above) {
+                                //var byte_above_left_pos = byte_pos - scanline_length - bytes_per_pixel;
+                                unfiltered_byte_value_above_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length - bytes_per_pixel);
+                            }
+                            // and we should have that unfiltered byte.
+                            
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            
+                            filtered_byte = unfiltered_byte - paeth_predictor(unfiltered_byte_value_left, unfiltered_byte_value_above, unfiltered_byte_value_above_left);
+                            //filtered_byte = unfiltered_byte - Math.floor((unfiltered_byte_value_left + unfiltered_byte_value_above) / 2);;
+                            
+                            if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                            scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
                         }
                     }
                 }
             },
+            
+            // This seems a lot faster than the old version.
+            //  Could be used as a basis for optimize_filter_all_scanlines.
+            //  That would make access to the unfiltered scanlines buffer, but it would try compression, using (up to) a 32k window, and choose the
+            //  scanline for each row, and leave it as that value.
+            // It may have 5 scanline scratch buffers as it carries out the function.
+            //  I also expect that it could do some fairly fast optimizations... perhaps making use of more than one row.
+            //  Perhaps it could do / keep track of the map/list of unique 2-byte sequences, and use those totals.
+            
+            // We could implement a faster version of the local scanline deflate test.
+            //  And then move the window back... would be slower, but similar code.
+            
+            // the unfiltering of scanlines could be sped up a lot too, by putting it in one function rather than line-by-line.
+            
+            'optimize_filter_all_scanlines': fp(function(a, sig) {
+                
+                var options = {}, callback;
+                
+                console.log('sig ' + sig);
+                
+                if (sig == '[f]') {
+                    callback = a[0];
+                }
+                if (sig == '[o,f]') {
+                    options = a[0];
+                    
+                    callback = a[1];
+                }
+                
+                // looks like the 'fast' option is not so fast, but much more optimized for 'mem' or 'ram'.
+                
+                var optimize = options.optimize || 'best';
+                console.log('optimize ' + optimize);
+                //throw 'stop';
+                // fast optimization will mean counting the recurring 16 bit and 32 bit words from the buffer.
+                
+                
+                
+                // callback
+                
+                // may take different options about how the optimization is done.
+                //  comparing unique 2-grams, 4-grams over the buffer made from the window could work OK... not sure on the speed.
+                // a fast n-gram comparison data structure would of course be good.
+                
+                
+                
+                // this could need a callback if it does deflate, otherwise it won't
+                //  there will be various optimization methods that can be used here.
+                //  at some stage it could be worth splitting optimizing functions into their own functions - repeating code, but less indirection.
+                
+                //console.log('optimize_filter_all_scanlines');
+                
+                var scanlines_buffer = this.scanlines_buffer;
+                var scanline_length = this.scanline_length;
+                
+                var scratch_line_buffers = new Array(5);
+                
+                
+                var scratch_full_buffers = new Array(5);
+                var scratch_test_buffers = new Array(5);
+                
+                
+                // if using an async method (like deflate) keeping all the filtered scanline buffers makes the most sense for now.
+                var map_found_16, map_found_32;
+                // don't want to have to create lots of buffer copies for closures.
+                
+                // just using scratch line buffers for optimization.
+                
+                
+                
+                // fast, good, better, best (ultimate?), ga?
+                
+                
+                for (var c = 0; c < 5; c++) {
+                    
+                    if (optimize == 'fast') {
+                        scratch_line_buffers[c] = new Buffer(scanline_length);
+                        scratch_line_buffers[c].writeUInt8(c, 0);
+                    }
+                    
+                    
+                    
+                    if (optimize == 'best') {
+                        scratch_full_buffers[c] = new Buffer(scanlines_buffer.length);
+                        scratch_test_buffers[c] = new Buffer(32768);
+                    }
+                    
+                    
+                    
+                    // the deflate window size.
+                    // 32768
+                    //scratch_test_buffers[c] = new Buffer(32000);
+                    
+                    
+                }
+                
+                // find out what is the optimal filter for each line...
+                //  for the first line we just use deflate?
+                
+                // optimized code here... will mean having some code inline here, will be quite a large function.
+                //  may repeat the scanline filtering code...
+                //  meaning that we create all the filtered versions of the scanlines.
+                //  doing this all at once could create an efficiency.
+                
+                var color_type = this.color_type;
+                
+                var h = this.size[1];
+                var scanline_filter_byte;
+                
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                var scanline_start, color_type;
+                var byte_pos;
+            
+                var unfiltered_byte;
+                var filtered_byte;
+                var unfiltered_byte_value_above;
+            
+                var unfiltered_byte_value_left;
+                var unfiltered_byte_value_above_left;
+                var has_left, has_above;
+                var b, c, iMin, min;
+                
+                var scanline_num;
+                
+                var byte_left_pos, byte_above_pos;
+                
+                var bytes_per_pixel = -1;
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        bytes_per_pixel = 3;
+                    }
+                    if (color_type == 6) {
+                        bytes_per_pixel = 4;
+                    }
+                }
+                
+                var count_unique, r16, r32, au = new Array(5);
+                
+                var filtered_byte_1, filtered_byte_2, filtered_byte_3, filtered_byte_4;
+                
+                var num_inner_functions_running = 0;
+                
+                // 'fast' seems slow compared to 'best'.
+                //  it uses less memory, though.
+                //  perhaps make a 'mem' optimization for what is currently 'fast'
+                // then we have 'fast' be like 'best' but with a smaller backwards looking window.
+                //  look back 1 scan line?
+                //  or 2.
+                // could choose a small number... but it is a small number anyway.
+                //  
+                var m_found_16;
+                
+                
+                var get_buffer_simple_uniqueness_score = function(line_buffer) {
+                    // could save on calling this function, having it inline.
+                    //  making a closure with a buffer many times... removing that could help.
+                    
+                    map_found_16 = {};
+                    //map_found_32 = {};
+                
+                    count_unique = 0;
+                    
+                    // could do random subsampling.
+                    //  however, it seems using zlib's deflate turns out to be fairly fast, as is buffer copying.
+                    
+                    
+                    
+                    //console.log('line_buffer.length ' + line_buffer.length);
+                    for (b = 0, l = line_buffer.length - 1; b < l; b++) {
+                        //console.log('b ' + b);
+                        r16 = line_buffer.readUInt16BE(b);
+                        //r32 = line_buffer.readUInt32BE(b);
+                        m_found_16 = map_found_16[r16];
+                        
+                        if (!m_found_16) {
+                            map_found_16[r16] = true;
+                            count_unique++;
+                        }
+                        //if (!map_found_32[r32]) {
+                            //map_found_32[r32] = true;
+                            //count_unique++;
+                        //}
+                    
+                    
+                    
+                    }
+                    //console.log('count_unique ' + count_unique);
+                    return count_unique;
+                
+                }
+                
+                for (var y = 0; y < h; y++) {
+                    //this.filter_scanline(y);
+                    scanline_num = y;
+                    //scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
+                    scanline_start = scanline_length * scanline_num;
+                    
+                    // don't read the scanline filter byte.
+                    
+                    // for every scanline filter, write it to the scratch line buffer.
+                    //console.log('y ' + y);
+                    // from the unfiltered scanlines buffer to the scratch buffer.
+                    // buf.copy(targetBuffer, [targetStart], [sourceStart], [sourceEnd])
+                    
+                    if (optimize == 'best') {
+                        //scratch_full_buffers[0].writeUInt8(0, scanline_start);
+                        scratch_full_buffers[1].writeUInt8(1, scanline_start);
+                        scratch_full_buffers[2].writeUInt8(2, scanline_start);
+                        scratch_full_buffers[3].writeUInt8(3, scanline_start);
+                        scratch_full_buffers[4].writeUInt8(4, scanline_start);
+                    
+                        // Filter 0
+                    
+                        //unfiltered_scanlines_buffer.copy(scratch_line_buffers[0], 0, scanline_start, scanline_start + scanline_length);  
+                        unfiltered_scanlines_buffer.copy(scratch_full_buffers[0], scanline_start, scanline_start, scanline_start + scanline_length);  
+                    } else {
+                        unfiltered_scanlines_buffer.copy(scratch_line_buffers[0], 0, scanline_start, scanline_start + scanline_length);  
+                    }
+                    
+                    
+                    
+                    // then need to do this byte by byte.
+                    //  all the filter methods at once, because in total they make use of a bunch of unfiltered byte values.
+                    // base it on paeth because that once gets all the values.
+                    
+                    //console.log('color_type ' + color_type);
+                    
+                    // could sample a smaller number of pixels to speed it up???
+                    //  or sample pixel sections - blocks of 3 pixels, randomly chosen where they occur out of blocks of 12.
+                    
+                    if (color_type == 2 || color_type == 6) {
+                        
+                        for (b = 1; b < scanline_length; b++) {
+                        
+                            //console.log('b ' + b);
+                            byte_pos = scanline_start + b;
+                            unfiltered_byte_value_above = 0;
+                            has_left = b >= bytes_per_pixel;
+                            has_above = scanline_num > 0;
+                            if (has_above) {
+                                //var byte_above_pos = byte_pos - scanline_length;
+                                unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
+                            }
+                            unfiltered_byte_value_left = 0;
+                            if (has_left) {
+                                //var byte_left_pos = byte_pos - bytes_per_pixel;
+                                unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                            }
+                            unfiltered_byte_value_above_left = 0;
+                            if (has_left && has_above) {
+                                //var byte_above_left_pos = byte_pos - scanline_length - bytes_per_pixel;
+                                unfiltered_byte_value_above_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length - bytes_per_pixel);
+                            }
+                            unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                            
+                            // then the different filtered bytes made.
+                            
+                            filtered_byte_1 = unfiltered_byte - unfiltered_byte_value_left;
+                            if (filtered_byte_1 < 0) filtered_byte_1 = filtered_byte_1 + 256;
+                            //
+                            
+                            
+                            filtered_byte_2 = unfiltered_byte - unfiltered_byte_value_above;
+                            if (filtered_byte_2 < 0) filtered_byte_2 = filtered_byte_2 + 256;
+                            //
+                            
+                            
+                            filtered_byte_3 = unfiltered_byte - Math.floor((unfiltered_byte_value_left + unfiltered_byte_value_above) / 2);
+                            if (filtered_byte_3 < 0) filtered_byte_3 = filtered_byte_3 + 256;
+                            //
+                            
+                            
+                            filtered_byte_4 = unfiltered_byte - paeth_predictor(unfiltered_byte_value_left, unfiltered_byte_value_above, unfiltered_byte_value_above_left);
+                            if (filtered_byte_4 < 0) filtered_byte_4 = filtered_byte_4 + 256;
+                            //
+                            
+                            
+                            if (optimize == 'best') {
+                                scratch_full_buffers[1].writeUInt8(filtered_byte_1, byte_pos);
+                                scratch_full_buffers[2].writeUInt8(filtered_byte_2, byte_pos);
+                                scratch_full_buffers[3].writeUInt8(filtered_byte_3, byte_pos);
+                                scratch_full_buffers[4].writeUInt8(filtered_byte_4, byte_pos);
+                            }
+                            if (optimize == 'fast') {
+                                scratch_line_buffers[1].writeUInt8(filtered_byte_1, b);
+                                scratch_line_buffers[2].writeUInt8(filtered_byte_2, b);
+                                scratch_line_buffers[3].writeUInt8(filtered_byte_3, b);
+                                scratch_line_buffers[4].writeUInt8(filtered_byte_4, b);
+                                
+                                // may not need these scratch line buffers.
+                                //  we can use some syncronous, continuous js methods that do some estimation of best filters.
+                                
+                                
+                                // then do calculations based on those scratch line buffers.
+                                //  we can calculate which are the filters with the smallest sizes.
+                                
+                                // for each of the buffers, work out which has got the least repeating 16 and 32 bit words that get read.
+                                //  could maybe do it with bytes as well?
+
+                                
+                            }
+                            
+                            
+                            
+                        }
+                        
+                        // within y loop, out of b loop
+                
+                    
+                        if (optimize == 'fast') {
+                            
+                            //var au = new Array(5);
+                            au[0] = get_buffer_simple_uniqueness_score(scratch_line_buffers[0]);
+                            au[1] = get_buffer_simple_uniqueness_score(scratch_line_buffers[1]);
+                            au[2] = get_buffer_simple_uniqueness_score(scratch_line_buffers[2]);
+                            au[3] = get_buffer_simple_uniqueness_score(scratch_line_buffers[3]);
+                            au[4] = get_buffer_simple_uniqueness_score(scratch_line_buffers[4]);
+                        
+                            // then work out which has got the lowest uniqueness score.
+                        
+                            iMin = -1;
+                            min = Infinity;
+                    
+                            for (c = 0; c < 5; c++) {
+                                if (au[c] < min) {
+                                    iMin = c;
+                                    min = au[c];
+                                }
+                            }
+                        
+                            //console.log('iMin ' + iMin);
+                        
+                            scratch_line_buffers[iMin].copy(scanlines_buffer, scanline_start, 0, scanline_length);
+                            
+                            
+                        }
+                        
+                        
+                        // would like to use call multi... but seems problematic.
+                        
+                    }
+                }
+                
+                // We have produced the scratch filtered ones...
+                
+                //console.log('finished computation of all filtered pixels... now need to choose filters');
+                // will mean going through the rows, seeing which is the best scanline filter to use.
+                
+                // proceeding row by row...
+                
+                // depending on the optimization...
+                //  with a fast optimization, can do the calculations in the same y loop.
+                
+                if (optimize == 'fast') {
+                    callback(null, true);
+                }
+                
+                if (optimize == 'best') {
+                    var y = 0;
+                    var deflation_test_buffer = new Buffer(scanline_length);
+                
+                    // can create the results for the most optimal filters to use...
+                    //  and then copy from these filtered buffers.
+                
+                    var proceed = function() {
+                        // compare the deflation of the various scanlines...
+                        // need to copy them over to the filtered image in turn.
+                        //  or we actually build a deflation_test_buffer
+                    
+                        var calculate_deflated_filtered_scanline_length = function(y, int_filter, callback) {
+                            var scanline_start = y * scanline_length;
+                            var amount_to_copy = 32768 - scanline_length;
+                            if (scanline_start < amount_to_copy) amount_to_copy = scanline_start;
+                            var copy_start_pos = scanline_start - amount_to_copy;
+                            scratch_test_buffers[int_filter].fill(0);
+                            scanlines_buffer.copy(scratch_test_buffers[int_filter], 0, copy_start_pos, scanline_start);
+                            scratch_full_buffers[int_filter].copy(scratch_test_buffers[int_filter], amount_to_copy, scanline_start, scanline_start + scanline_length);
+                            get_deflated_length(scratch_test_buffers[int_filter], function(err, res_deflated_length) {
+                                if (err) {
+                                    throw err;
+                                } else {
+                                    //console.log('res_deflated_length ' + res_deflated_length);
+                                    callback(null, res_deflated_length);
+                                }
+                            })
+                        }
+                    
+                        // deflates only that scanline...
+                        //  we could look back further.
+                        var calculate_smallest_deflated_scanline_filter = function(y, callback) {
+                            // Can use a local method, or something with a look-back window.
+                            //  Lookback window should produce the best optimization... but code could be inefficient with copying and compressing lots of different buffers.
+                            var num_to_process = 5;
+                            var res = new Array(5);
+                            var cb = function() {
+                                num_to_process--;
+                                if (num_to_process == 0) {
+                                    //callback(null, res);
+                                
+                                    var iMin = -1;
+                                    var min = Infinity;
+                                
+                                    for (var c = 0; c < 5; c++) {
+                                        if (res[c] < min) {
+                                            iMin = c;
+                                            min = res[c];
+                                        }
+                                    }
+                                    callback(null, iMin);
+                                }
+                            }
+                        
+                            calculate_deflated_filtered_scanline_length(y, 0, function(err, res_deflated_sl0) {
+                                if (err) {
+                                    throw err;
+                                } else {
+                                    res[0] = res_deflated_sl0;
+                                    //console.log('res_deflated_sl0 ' + res_deflated_sl0);
+                                    cb();
+                                }
+                            })
+                            calculate_deflated_filtered_scanline_length(y, 1, function(err, res_deflated_sl1) {
+                                if (err) {
+                                    throw err;
+                                } else {
+                                    res[1] = res_deflated_sl1;
+                                    cb();
+                                    //console.log('res_deflated_sl0 ' + res_deflated_sl0);
+                                }
+                            })
+                            calculate_deflated_filtered_scanline_length(y, 2, function(err, res_deflated_sl2) {
+                                if (err) {
+                                    throw err;
+                                } else {
+                                    res[2] = res_deflated_sl2;
+                                    cb();
+                                    //console.log('res_deflated_sl0 ' + res_deflated_sl0);
+                                }
+                            })
+                            calculate_deflated_filtered_scanline_length(y, 3, function(err, res_deflated_sl3) {
+                                if (err) {
+                                    throw err;
+                                } else {
+                                    res[3] = res_deflated_sl3;
+                                    cb();
+                                    //console.log('res_deflated_sl0 ' + res_deflated_sl0);
+                                }
+                            })
+                            calculate_deflated_filtered_scanline_length(y, 4, function(err, res_deflated_sl4) {
+                                if (err) {
+                                    throw err;
+                                } else {
+                                    res[4] = res_deflated_sl4;
+                                    cb();
+                                    //console.log('res_deflated_sl0 ' + res_deflated_sl0);
+                                }
+                            })
+                        }
+                    
+                        calculate_smallest_deflated_scanline_filter(y, function(err, res_smallest_local) {
+                            if (err) {
+                                throw err;
+                            } else {
+                                //console.log('y, res_smallest_local ' + y + ', ' + res_smallest_local);
+                                var scanline_start = y * scanline_length;
+                            
+                                // then use that to copy from the buffer of the filtered scanline.
+                                scratch_full_buffers[res_smallest_local].copy(scanlines_buffer, scanline_start, scanline_start, scanline_start + scanline_length);
+                            
+                                y++;
+                                if (y < h) {
+                                    proceed();
+                                } else {
+                                    callback(null, true);
+                                }
+                            }
+                        })
+                    }
+                
+                    if (y < h) proceed();
+                
+                }
+                
+                
+                
+                
+            }),
+            
+            
+            
+            'filter_all_scanlines': function() {
+                
+                //console.log('filter_all_scanlines');
+                //throw 'stop';
+                
+                //this.ensure_unfiltered_scanlines_buffer();
+                
+                var h = this.size[1];
+                var scanline_filter_byte;
+                var scanlines_buffer = this.scanlines_buffer;
+                var scanline_length = this.scanline_length;
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                var scanline_start, color_type = this.color_type;;
+                var byte_pos;
+            
+                var unfiltered_byte;
+                var filtered_byte;
+                var unfiltered_byte_value_above;
+            
+                var unfiltered_byte_value_left;
+                var unfiltered_byte_value_above_left;
+                var has_left, has_above;
+                var b;
+                
+                var scanline_num;
+                
+                var byte_left_pos, byte_above_pos;
+                
+                var bytes_per_pixel = -1;
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        bytes_per_pixel = 3;
+                    }
+                    if (color_type == 6) {
+                        bytes_per_pixel = 4;
+                    }
+                }
+                
+                for (var y = 0; y < h; y++) {
+                    //this.filter_scanline(y);
+                    scanline_num = y;
+                    scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
+                    scanline_start = scanline_length * scanline_num;
+                
+                    if (scanline_filter_byte == 0) {
+                    }
+                
+                    if (scanline_filter_byte == 1) {
+                        // it's the 'left' filter.
+                        if (color_type == 2 || color_type == 6) {
+                            for (b = 1; b < scanline_length; b++) {
+                                byte_pos = scanline_start + b;
+                                unfiltered_byte_value_left = 0;
+                                if (b >= bytes_per_pixel) {
+                                    unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                                }
+                                unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                                filtered_byte = unfiltered_byte - unfiltered_byte_value_left;
+                                if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                                scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                            }
+                        }
+                    }
+                
+                    if (scanline_filter_byte == 2) {
+                        // it's the 'above' filter.
+                        if (color_type == 2 || color_type == 6) {
+                            for (b = 1; b < scanline_length; b++) {
+                                byte_pos = scanline_start + b;
+                                unfiltered_byte_value_above = 0;
+                                if (scanline_num > 0) {
+                                    unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
+                                }
+                                // and we should have that unfiltered byte.
+                                unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                                filtered_byte = unfiltered_byte - unfiltered_byte_value_above;
+                                if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                                scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                            }
+                        }
+                    }
+                
+                    if (scanline_filter_byte == 3) {
+                        // it's the 'average' filter.
+                        // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
+                    
+                        if (color_type == 2 || color_type == 6) {
+                            for (b = 1; b < scanline_length; b++) {
+                                //var byte_value_above = 0;
+                                byte_pos = scanline_start + b;
+                                unfiltered_byte_value_above = 0;
+                                if (scanline_num > 0) {
+                                    byte_above_pos = byte_pos - scanline_length;
+                                    unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_above_pos);
+                                }
+                                unfiltered_byte_value_left = 0;
+                                if (b >= bytes_per_pixel) {
+                                    byte_left_pos = byte_pos - bytes_per_pixel;
+                                    unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
+                                }
+                                unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                                filtered_byte = unfiltered_byte - Math.floor((unfiltered_byte_value_left + unfiltered_byte_value_above) / 2);
+                                if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                                scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                            }
+                        
+                        }
+                    
+                    }
+                    
+                    if (scanline_filter_byte == 4) {
+                        // it's the 'paeth' filter.
+                        // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
+                        if (color_type == 2 || color_type == 6) {
+                            for (b = 1; b < scanline_length; b++) {
+                                byte_pos = scanline_start + b;
+                                unfiltered_byte_value_above = 0;
+                                has_left = b >= bytes_per_pixel;
+                                has_above = scanline_num > 0;
+                                if (has_above) {
+                                    //var byte_above_pos = byte_pos - scanline_length;
+                                    unfiltered_byte_value_above = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length);
+                                }
+                                unfiltered_byte_value_left = 0;
+                                if (has_left) {
+                                    //var byte_left_pos = byte_pos - bytes_per_pixel;
+                                    unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
+                                }
+                                unfiltered_byte_value_above_left = 0;
+                                if (has_left && has_above) {
+                                    //var byte_above_left_pos = byte_pos - scanline_length - bytes_per_pixel;
+                                    unfiltered_byte_value_above_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length - bytes_per_pixel);
+                                }
+                                unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
+                                filtered_byte = unfiltered_byte - paeth_predictor(unfiltered_byte_value_left, unfiltered_byte_value_above, unfiltered_byte_value_above_left);
+                                if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                                scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
+                            }
+                        }
+                    }
+                    
+                    
+                }
+            },
+            
+            
+            '_filter_all_scanlines': function() {
+                
+                
+                console.log('filter_all_scanlines');
+                //throw 'stop';
+                
+                //this.ensure_unfiltered_scanlines_buffer();
+                
+                var h = this.size[1];
+                for (var y = 0; y < h; y++) {
+                    this.filter_scanline(y);
+                }
+                
+            },
+            
             
             // want to be able to change it to a higher bit depth.
             //  could change to argb, then copy the scanlines directly... but would need to keep the same filtering?
@@ -1252,609 +2278,11 @@ PNG compression method 0
                 for (var y = 0; y < height; y++) {
                     this.iterate_row(y, pixel_callback);
                 }
-                
-            },
-            
-            // This will be refined.
-            '_iterate_pixels': function(pixel_callback) {
-                //console.log('* calling iterate_pixels');
-                //console.log('');
-            
-                // will read through the scanlines_buffer.
-                //  chunks have already been handled / copied into this scanlines buffer.
-                
-                // depends on the color mode - iterates through the png using the png's
-                //  color settings, making the data easily usable, but still in terms of
-                //  indexed color etc (though may return actual pixel values too).
-                
-                // pixel_callback(x, y, color)
-                //  color can be an argb array, or rgb array
-                //  or an integer
-                
-                var width = this.size[0];
-                var height = this.size[1];
-                
-                var color_type = this.color_type;
-                var bit_depth = this.bit_depth;
-                
-                //console.log('color_type ' + color_type);
-                //console.log('bit_depth ' + bit_depth);
-                
-                // go through each of the scanlines...
-                
-                // then different logic for the image data in each of the scanline depending on the bit depth.
-                
-                var scanline_length = this.scanline_length;
-                //console.log('scanline_length ' + scanline_length);
-                
-                var scanlines_buffer = this.scanlines_buffer;
-                
-                // go through each of the scanlines.
-                
-                var scanline_num = 0;
-                
-                // and know the x and y coords.
-                var that = this;
-                
-                var above_defiltered_scanline;
-                
-                var arr_line_pixel_colors = [];
-                // the previous defiltered byte value...
-                
-                // we can calculate the positions of the items in the previous scanline without too much difficulty.
-                
-                var read_scanline = function() {
-                    arr_line_pixel_colors[scanline_num] = [];
-                    var scanline_start = scanline_num * scanline_length;
-                    var scanline_end = scanline_start + scanline_length;
-                    
-                    var scanline_data_start = scanline_start + 1;
-                    
-                    // iterate through each of the pixels there...
-                    var scanline_filter_byte = scanlines_buffer.readUInt8(scanline_start);
-                    //console.log('scanline_start ' + scanline_start);
-                    //console.log('scanline_filter_byte ' + scanline_filter_byte);
-                    
-                    // no need to copy the scanline into a buffer.
-                    //  go through it, getting the pixels.
-                    
-                    //console.log('*** color_type ' + color_type);
-                    
-                    // Want to be able to save with this filter... other filters too
-                    //  Some filters could effect lines further down by changing a line, because the lines further down
-                    //  refer to a line above.
-                    
-                    if (color_type == 2) {
-                        // rgb, no alpha channel
-                        if (bit_depth == 8) {
-                            console.log('scanline_filter_byte ' + scanline_filter_byte);
-                            
-                            // need to be able to read the values for these rows which use a filter.
-                            
-                            if (scanline_filter_byte == 0) {
-                                // each pixel is made up of 4 bytes from the scanline.
-                                // will extract them.
-                                var x = 0;
-                                //console.log('scanline_data_start ' + scanline_data_start);
-                                //console.log('scanline_length ' + scanline_length);
-                                
-                                //console.log('scanline_data_start ' + scanline_data_start);
-                                
-                                for (var c = scanline_data_start; c < scanline_end; c = c + 3) {
-                                    // get the pixel values.
-                                    
-                                    // read uint.
-                                    var r = scanlines_buffer.readUInt8(c);
-                                    var g = scanlines_buffer.readUInt8(c + 1);
-                                    var b = scanlines_buffer.readUInt8(c + 2);
-                                    //var a = scanlines_buffer.readUInt8(c + 3);
-                                    
-                                    //console.log('read a ' + a);
-                                    var col = [r, g, b];
-                                    //var col = scanlines_buffer.readUInt8(c);
-                                    
-                                    console.log('col ' + stringify(col));
-                                    
-                                    pixel_callback(x, scanline_num, col);
-                                    arr_line_pixel_colors[scanline_num].push(col);
-                                    
-                                    x++;
-                                    
-                                }
-                            } else if (scanline_filter_byte == 1) {
-                                //var raw_left_col, filtered_left_col;
-                                //var defiltered_left_col;
-                                
-                                // will refer to the previous scanline.
-                                
-                                var x = 0;
-                                for (var c = scanline_data_start; c < scanline_end; c = c + 3) {
-                                    // 8 bit per channel
-                                    
-                                    // But doing this pixel by pixel... need to be careful about how this
-                                    //  is done.
-                                    
-                                    // rgb - 24 bits per pixel. no alpha channel.
-                                    
-                                    // 
-                                    
-                                    var r = scanlines_buffer.readUInt8(c);
-                                    var g = scanlines_buffer.readUInt8(c + 1);
-                                    var b = scanlines_buffer.readUInt8(c + 2);
-                                   
-                                    //var raw_pixel_data = scanlines_buffer.readUInt8(c);
-                                    
-                                    // Note this computation is done for each byte, regardless of bit depth
-                                    
-                                    //  So it's based on the previous byte.
-                                    
-                                    var filtered_col = [r, g, b];
-                                    console.log('filtered_col ' + stringify(filtered_col));
-                                    
-                                    //console.log('raw_pixel_data ' + raw_pixel_data);
-                                    //console.log('pixel_data (indexed color) ' + pixel_data);
-                                    
-                                    // then get the color from the index...?
-                                    // need to refer to the pixel to the left.
-                                    
-                                    // Gets applied on each channel.
-                                    
-                                    // it's if the byte number is greater than 0.
-                                    
-                                    var defiltered_col;
-                                    if (x > 0) {
-                                        // getting it from above... need to read the pixel above.
-                                        
-                                        //var above_r = scanlines_buffer.readUInt8(c - scanline_length);
-                                        //var above_g = scanlines_buffer.readUInt8(c + 1 - scanline_length);
-                                        //var above_b = scanlines_buffer.readUInt8(c + 2 - scanline_length);
-                                        
-                                        var prev_defiltered_pixel = arr_line_pixel_colors[scanline_num][x - 1];
-                                        
-                                        var defiltered_r = r + prev_defiltered_pixel[0];
-                                        var defiltered_g = g + prev_defiltered_pixel[1];
-                                        var defiltered_b = b + prev_defiltered_pixel[2];
-                                        
-                                        
-                                        
-                                        //defiltered_col = [filtered_col[0] + above_pixel[0], filtered_col[1] + above_pixel[1], filtered_col[2] + above_pixel[2]];
-                                        defiltered_col = [defiltered_r, defiltered_g, defiltered_b];
-                                        if (defiltered_col[0] > 255) defiltered_col[0] = defiltered_col[0] - 256;
-                                        if (defiltered_col[1] > 255) defiltered_col[1] = defiltered_col[1] - 256;
-                                        if (defiltered_col[2] > 255) defiltered_col[2] = defiltered_col[2] - 256;
-                                        
-                                        
-                                        
-                                        //filtered_pixel_data = raw_pixel_data + raw_left;
-                                    } else {
-                                        //filtered_pixel_data = raw_col;
-                                        defiltered_col = filtered_col;
-                                        //filtered_col = [raw_col[0], raw_col[1], raw_col[2]];
-                                        
-                                    }
-                                    
-                                    pixel_callback.call(that, x, scanline_num, defiltered_col);
-                                    arr_line_pixel_colors[scanline_num].push(defiltered_col);
-                                    //defiltered_left_col = defiltered_col;
-                                    //raw_left_col = raw_col;
-                                    
-                                    
-                                    x++;
-                                } 
-                            } else if (scanline_filter_byte == 2) {
-                                // the 'up' filter.
-                                
-                                // will need to remember the defiltered values for the row above.
-                                //  that happens as part of it now...
-                                
-                                var x = 0;
-                                for (var c = scanline_data_start; c < scanline_end; c = c + 3) {
-                                    
-                                    var r = scanlines_buffer.readUInt8(c);
-                                    var g = scanlines_buffer.readUInt8(c + 1);
-                                    var b = scanlines_buffer.readUInt8(c + 2);
-                                   
-                                    //var raw_pixel_data = scanlines_buffer.readUInt8(c);
-                                    
-                                    // Note this computation is done for each byte, regardless of bit depth
-                                    
-                                    //  So it's based on the previous byte.
-                                    
-                                    var filtered_col = [r, g, b];
-                                    //console.log('filtered_col ' + filtered_col);
-                                    
-                                    //console.log('raw_pixel_data ' + raw_pixel_data);
-                                    //console.log('pixel_data (indexed color) ' + pixel_data);
-                                    
-                                    // then get the color from the index...?
-                                    // need to refer to the pixel to the left.
-                                    
-                                    // Gets applied on each channel.
-                                    
-                                    // it's if the byte number is greater than 0.
-                                    
-                                    var defiltered_col;
-                                    if (scanline_num > 0) {
-                                        // need to look above
-                                        
-                                        // get the values above...
-                                        
-                                        var pixel_above = arr_line_pixel_colors[scanline_num - 1][x];
-                                        //console.log('pixel_above ' + pixel_above);
-                                        defiltered_col = [filtered_col[0] + pixel_above[0], filtered_col[1] + pixel_above[1], filtered_col[2] + pixel_above[2]];
-                                        if (defiltered_col[0] > 255) defiltered_col[0] = defiltered_col[0] - 256;
-                                        if (defiltered_col[1] > 255) defiltered_col[1] = defiltered_col[1] - 256;
-                                        if (defiltered_col[2] > 255) defiltered_col[2] = defiltered_col[2] - 256;
-                                        
-                                        
-                                        
-                                        //filtered_pixel_data = raw_pixel_data + raw_left;
-                                    } else {
-                                        //filtered_pixel_data = raw_col;
-                                        defiltered_col = filtered_col;
-                                        //filtered_col = [raw_col[0], raw_col[1], raw_col[2]];
-                                        
-                                    }
-                                    
-                                    pixel_callback.call(that, x, scanline_num, defiltered_col);
-                                    arr_line_pixel_colors[scanline_num].push(defiltered_col);
-                                    //defiltered_left_col = defiltered_col;
-                                    //raw_left_col = raw_col;
-                                    
-                                    
-                                    x++;
-                                } 
-                                
-                                
-                                //above_defiltered_scanline = 
-                            } else if (scanline_filter_byte == 3) {
-                                // the 'up' filter.
-                                
-                                // Average(x) + floor((Raw(x-bpp)+Prior(x))/2)
-                                
-                                // get the above byte value, get the left byte value.
-                                //  done by getting (unfiltered) pixel values.
-                                
-                                // if either no value above, or left, we use 0 as the values.
-                                
-                                
-                                
-                                var x = 0;
-                                for (var c = scanline_data_start; c < scanline_end; c = c + 3) {
-                                    
-                                    var r = scanlines_buffer.readUInt8(c);
-                                    var g = scanlines_buffer.readUInt8(c + 1);
-                                    var b = scanlines_buffer.readUInt8(c + 2);
-                                   
-                                    var filtered_col = [r, g, b];
-                                    //console.log('filtered_col ' + filtered_col);
-                                    
-                                    //var defiltered_col;
-                                    
-                                    var above_pixel = [0, 0, 0];
-                                    //var left_pixel = [0, 0, 0];
-                                    var left_pixel = [0, 0, 0];
-                                    
-                                    if (scanline_num > 0) {
-                                        // need to look above
-                                        
-                                        //filtered_pixel_data = raw_pixel_data + raw_left;
-                                        above_pixel = arr_line_pixel_colors[scanline_num - 1][x];
-                                        
-                                        
-                                    }
-                                    if (x > 0) {
-                                        //left_pixel = arr_line_pixel_colors[scanline_num][x - 1]
-                                        // but we refer to the left byte.
-                                        
-                                        // look previously on the scanline.
-                                        //var prev_byte = 
-                                        //left_byte =
-                                        
-                                        // but do the left byte for each of them...
-                                        left_pixel = arr_line_pixel_colors[scanline_num][x - 1];
-                                        
-                                        
-                                    }
-                                    
-                                    // then work out the various defiltered values.
-                                    
-                                    // make reference to the above and left pixels.
-                                    
-                                    // then need to do averaging.
-                                    
-                                    var avg_r = Math.floor((above_pixel[0] + left_pixel[0]) / 2)                     
-                                    var avg_g = Math.floor((above_pixel[1] + left_pixel[1]) / 2)                     
-                                    var avg_b = Math.floor((above_pixel[2] + left_pixel[2]) / 2)                     
-                                    
-                                    var defiltered_r = r + avg_r;
-                                    var defiltered_g = g + avg_g;
-                                    var defiltered_b = b + avg_b;
-                                    
-                                    if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                    if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                    if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                    
-                                    var defiltered_col = [defiltered_r, defiltered_g, defiltered_b];
-                                    
-                                    pixel_callback.call(that, x, scanline_num, defiltered_col);
-                                    arr_line_pixel_colors[scanline_num].push(defiltered_col);
-                                    //defiltered_left_col = defiltered_col;
-                                    //raw_left_col = raw_col;
-                                    
-                                    x++;
-                                }
-                                
-                                
-                            } else if (scanline_filter_byte == 4) {
-                                // Paeth predictor is type 4.
-                                // paeth_predictor
-                                
-                                // need 3 pixel values - left, above, above left
-                                
-                                var x = 0;
-                                for (var c = scanline_data_start; c < scanline_end; c = c + 3) {
-                                    
-                                    var r = scanlines_buffer.readUInt8(c);
-                                    var g = scanlines_buffer.readUInt8(c + 1);
-                                    var b = scanlines_buffer.readUInt8(c + 2);
-                                   
-                                    var filtered_col = [r, g, b];
-                                    console.log('filtered_col ' + filtered_col);
-                                    
-                                    //var defiltered_col;
-                                    
-                                    var above_pixel = [0, 0, 0];
-                                    //var left_pixel = [0, 0, 0];
-                                    var left_pixel = [0, 0, 0];
-                                    var above_left_pixel = [0, 0, 0];
-                                    
-                                    if (scanline_num > 0) {
-                                        // need to look above
-                                        
-                                        //filtered_pixel_data = raw_pixel_data + raw_left;
-                                        above_pixel = arr_line_pixel_colors[scanline_num - 1][x];
-                                        
-                                        
-                                    }
-                                    if (x > 0) {
-                                        //left_pixel = arr_line_pixel_colors[scanline_num][x - 1]
-                                        // but we refer to the left byte.
-                                        
-                                        // look previously on the scanline.
-                                        //var prev_byte = 
-                                        //left_byte =
-                                        
-                                        // but do the left byte for each of them...
-                                        left_pixel = arr_line_pixel_colors[scanline_num][x - 1];
-                                        
-                                        
-                                    }
-                                    if (scanline_num > 0 && x > 0) {
-                                        above_left_pixel = arr_line_pixel_colors[scanline_num - 1][x - 1];
-                                    }
-                                    
-                                    // then work out the various defiltered values.
-                                    
-                                    // make reference to the above and left pixels.
-                                    
-                                    // then need to do averaging.
-                                    
-                                    //var avg_r = Math.floor((above_pixel[0] + left_pixel[0]) / 2)                     
-                                    //var avg_g = Math.floor((above_pixel[1] + left_pixel[1]) / 2)                     
-                                    //var avg_b = Math.floor((above_pixel[2] + left_pixel[2]) / 2)                     
-                                    
-                                    // reverse: Paeth(x) + PaethPredictor(Raw(x-bpp), Prior(x), Prior(x-bpp))
-                                    
-                                    var p_r = paeth_predictor(left_pixel[0], above_pixel[0], above_left_pixel[0]);
-                                    var p_g = paeth_predictor(left_pixel[1], above_pixel[1], above_left_pixel[1]);
-                                    var p_b = paeth_predictor(left_pixel[2], above_pixel[2], above_left_pixel[2]);
-                                    
-                                    
-                                    var defiltered_r = r + p_r;
-                                    var defiltered_g = g + p_g;
-                                    var defiltered_b = b + p_b;
-                                    
-                                    if (defiltered_r > 255) defiltered_r = defiltered_r - 256;
-                                    if (defiltered_g > 255) defiltered_g = defiltered_g - 256;
-                                    if (defiltered_b > 255) defiltered_b = defiltered_b - 256;
-                                    
-                                    var defiltered_col = [defiltered_r, defiltered_g, defiltered_b];
-                                    
-                                    pixel_callback.call(that, x, scanline_num, defiltered_col);
-                                    arr_line_pixel_colors[scanline_num].push(defiltered_col);
-                                    defiltered_left_col = defiltered_col;
-                                    //raw_left_col = raw_col;
-                                    
-                                    x++;
-                                } 
-                            } else {
-                                // reading filter type 3...
-                                
-                                // no more normally defined filters.
-                                throw 'Unsupported filter ' + scanline_filter_byte;
-                            }
-                        }
-                    }
-                    
-                    // depending on the number of bpp...
-                    if (color_type == 6) {
-                        if (bit_depth == 8) {
-                            
-                            if (scanline_filter_byte == 0) {
-                                // each pixel is made up of 4 bytes from the scanline.
-                                // will extract them.
-                                var x = 0;
-                                //console.log('scanline_data_start ' + scanline_data_start);
-                                //console.log('scanline_length ' + scanline_length);
-                                
-                                //console.log('scanline_data_start ' + scanline_data_start);
-                                
-                                for (var c = scanline_data_start; c < scanline_end; c = c + 4) {
-                                    // get the pixel values.
-                                    
-                                    // read uint.
-                                    var r = scanlines_buffer.readUInt8(c);
-                                    var g = scanlines_buffer.readUInt8(c + 1);
-                                    var b = scanlines_buffer.readUInt8(c + 2);
-                                    var a = scanlines_buffer.readUInt8(c + 3);
-                                    
-                                    //console.log('read a ' + a);
-                                    
-                                    var col = [r, g, b, a];
-                                    
-                                    console.log('col ' + stringify(col));
-                                    
-                                    pixel_callback(x, scanline_num, col);
-                                    x++;
-                                    
-                                }
-                            } else {
-                                throw 'Unsupported filter ' + scanline_filter_byte;
-                            }
-                        }
-                        // other bit depths as well.
-                    }
-                    
-                    
-                    if (color_type == 3) {
-                        // look at the bit depth.
-                        //  if it's less than 8, we need to deconstruct the various pixels into their components, and save those indexed values.
-                        
-                        // divide each byte value up into subpixels with lower bit depth.
-                        
-                        //console.log('color type 3, bit_depth ' + bit_depth);
-                        
-                        if (bit_depth == 1) {
-                            
-                            if (scanline_filter_byte == 0) {
-                                
-                                var n = 0;
-                                var x = 0;
-                               
-                                for (var c = scanline_data_start; c < scanline_end; c++) {
-                                    
-                                    var pixels_data = scanlines_buffer.readUInt8(c);
-                                    //console.log('pixels_data ' + pixels_data);
-                                    
-                                    // don't read past the width.
-                                    
-                                    for (var c2 = 7; c2 >= 0; c2--) {
-                                        //console.log('multi_px_value & (1 << c2) ' + multi_px_value & (1 << c2));
-                                        var p = pixels_data & (1 << c2);
-                                        var p2 = p > 0 ? 1 : 0;
-                                        
-                                        if (x < width) {
-                                            pixel_callback.call(that, x, scanline_num, p2);
-                                        }
-                                        
-                                        x++;
-                                    }
-                                    // x = n * 8 + c2
-                                    n++;
-                                }
-                            } else {
-                                // filter 1 Sub
-                                
-                                //  pxData[pxPos + i] = idx != 0xff ? rawData[rawPos + idx] + left : 0xff;
-                                
-                                // go through the line, but will be referring back to the previous pixel, or 0xff
-                                
-                                /*
-                                
-                                for (var c = scanline_data_start; c < scanline_end; c++) {
-                                    
-                                    var pixels_data = scanlines_buffer.readUInt8(c);
-                                    //console.log('pixels_data ' + pixels_data);
-                                    
-                                    // don't read past the width.
-                                    
-                                    for (var c2 = 7; c2 >= 0; c2--) {
-                                        //console.log('multi_px_value & (1 << c2) ' + multi_px_value & (1 << c2));
-                                        var p = pixels_data & (1 << c2);
-                                        var p2 = p > 0 ? 1 : 0;
-                                        
-                                        if (x < width) {
-                                            pixel_callback.call(that, x, scanline_num, p2);
-                                        }
-                                        
-                                        
-                                        x++;
-                                    }
-                                    // x = n * 8 + c2
-                                    n++;
-                                }
-                                */
-                                
-                                
-                            
-                                throw 'Unsupported filter ' + scanline_filter_byte;
-                            }
-                            //console.log('n ' + n);
-                        }
-                        
-                        // bit depth 2 - 4 colors
-                        // bit depth 4 - 16 colors
-                        // bit depth 8 - 256 colors
-                        
-                        if (bit_depth == 8) {
-                            if (scanline_filter_byte == 0) {
-                                var x = 0;
-                                //console.log('scanline_data_start ' + scanline_data_start);
-                                
-                                for (var c = scanline_data_start; c < scanline_end; c++) {
-                                    // 8 bit per pixel
-                                    var pixel_data = scanlines_buffer.readUInt8(c);
-                                    //console.log('pixel_data (indexed color) ' + pixel_data);
-                                    // then get the color from the index...?
-                                    
-                                    pixel_callback.call(that, x, scanline_num, pixel_data);
-                                    
-                                    x++;
-                                }
-                            } else if (scanline_filter_byte == 1) {
-                                console.log('scanline filter 1');
-                                throw 'stop';
-                                
-                                /*
-                                var raw_left;
-                                for (var c = scanline_data_start; c < scanline_end; c++) {
-                                    // 8 bit per pixel
-                                    var raw_pixel_data = scanlines_buffer.readUInt8(c);
-                                    //console.log('pixel_data (indexed color) ' + pixel_data);
-                                    
-                                    // then get the color from the index...?
-                                    // need to refer to the pixel to the left.
-                                    var filtered_pixel_data;
-                                    if (c > 0) {
-                                        
-                                        filtered_pixel_data = raw_pixel_data - raw_left;
-                                    } else {
-                                        filtered_pixel_data = raw_pixel_data;
-                                    }
-                                    
-                                    pixel_callback.call(that, x, scanline_num, filtered_pixel_data);
-                                    raw_left = raw_pixel_data;
-                                    
-                                    
-                                    x++;
-                                }
-                                */
-                                
-                                
-                            } else {
-                                throw 'Unsupported filter ' + scanline_filter_byte;
-                            }
-                        }
-                    }
-                    
-                    scanline_num++;
-                    if (scanline_num < height) read_scanline();
-                }
-                read_scanline();
             },
             
             // convert to different format...
+            //  want to investigate changing down to indexed color from an rgba image.
+            //  can try different quantizing and dithering methods.
             
             'set_color_parameters': function(color_type, bit_depth) {
                 // could take a string such as 'rgba 32'.
@@ -1947,7 +2375,6 @@ PNG compression method 0
             },
             
             'get_signature_buffer': function() {
-                
                 var png_signature_buffer = new Buffer(8);
                 png_signature_buffer.writeUInt8(137, 0);
                 png_signature_buffer.writeUInt8(80, 1);
@@ -1957,7 +2384,6 @@ PNG compression method 0
                 png_signature_buffer.writeUInt8(10, 5);
                 png_signature_buffer.writeUInt8(26, 6);
                 png_signature_buffer.writeUInt8(10, 7);
-                
                 return png_signature_buffer;
             },
             
@@ -1997,8 +2423,27 @@ PNG compression method 0
             },
             
             'get_buffer_IDAT': function(callback) {
-                this.filter_all_scanlines();
-            
+                // if we have loaded it, we have the unfiltered_scanlines_buffer.
+                // we want to be able to use the unfiltered scanlines buffer to save,
+                //  re-encoding it.
+                // It's easier to do operations on the unfiltered scanlines buffer.
+                //  Keeping them in sync after each operation may be tricky... more costly for cpu.
+                // It could vary though, because a small update would not need full image re-encoding.
+                //  Could have optional partial image reencoding.
+                
+                // for the moment, want to improve the save function.
+                //  want to have a function that encodes the filtered scanlines based on optimizing which canline filter to use.
+                
+                // but when it is loaded, we have it loaded into the unfiltered scanline buffer?
+                
+                
+                //this.ensure_unfiltered_scanlines_buffer();
+                
+                //this.filter_all_scanlines();
+                //  not any more... this relies on the scanlines being right at this time.
+                //  generally the unfilteres scanlines buffer will be kept up to date.
+                
+                
                 var deflate = zlib.createDeflate({
                         chunkSize: 32 * 1024,
                         level: 9,
@@ -2063,7 +2508,6 @@ PNG compression method 0
                     IDAT_buffer.writeInt32BE(CrcStream.crc32(IDAT_buffer.slice(4, IDAT_buffer.length - 4)), IDAT_buffer.length - 4);
                     //IDAT_buffer.writeInt32BE(CrcStream.crc32(buffer), IDAT_buffer.length - 4);
 
-                    
                     callback(IDAT_buffer);
                 });
                 
@@ -2091,36 +2535,161 @@ PNG compression method 0
             //'save_to_stream': function(output_stream
             
             // a writable stream.
-            'save_to_stream': function(stream) {
-                // don't think callback is needed because we can detect when the stream ends.
-                var that = this;
-                var png_signature_buffer = this.get_signature_buffer();
-                var IHDR_buffer = this.get_buffer_IHDR();
-                console.log('pre get_buffer_IDAT');
-                this.get_buffer_IDAT(function(IDAT_buffer) {
-                    console.log('cb get_buffer_IDAT');
-                    var IEND_buffer = that.get_buffer_IEND();
-                    
-                    stream.write(png_signature_buffer);
-                    
-                    stream.write(IHDR_buffer);
-                    stream.write(IDAT_buffer);
-                    
-                    stream.write(IEND_buffer);
-                    
-                    // want to end the stream too.
-                    
-                    stream.end();
-                    
-                    
-                    
-                    //callback();
-                });
+            'save_to_stream': fp(function(a, sig) {
+                var stream, options = {};
+                // stream
+                // stream, options
                 
-            },
+                if (sig == '[S]') {
+                    stream = a[0];
+                }
+                if (sig == '[S,o]') {
+                    stream = a[0];
+                    options = a[1];
+                }
+                
+                var optimize = options.optimize;
+                console.log('optimize ' + optimize);
+                //throw 'stop';
+                
+                var that = this;
+                
+                
+                var do_optimize = function(callback) {
+                    // optimizing the scanline filters.
+                    
+                    if (optimize == 'fast' || optimize == 'best') {
+                        
+                        that.optimize_filter_all_scanlines({'optimize': optimize}, function(err, res_best_filters) {
+                            //that.filter_all_scanlines();
+                            callback(null, true);
+                        })
+                        //that.optimize_scanline_filters(function(err, res_best_filters) {
+                        //    that.filter_all_scanlines();
+                        //    callback(null, true);
+                        //})
+                        
+                        
+                    } else {
+                        callback(null, true);
+                    }
+                    
+                    
+                }
+                
+                var do_save = function() {
+                    var png_signature_buffer = that.get_signature_buffer();
+                    var IHDR_buffer = that.get_buffer_IHDR();
+                    that.get_buffer_IDAT(function(IDAT_buffer) {
+                        var IEND_buffer = that.get_buffer_IEND();
+                        stream.write(png_signature_buffer);
+                        stream.write(IHDR_buffer);
+                        stream.write(IDAT_buffer);
+                        stream.write(IEND_buffer);
+                        stream.end();
+                        stream.destroySoon();
+                        //callback();
+                    });
+                }
+                
+                if (optimize) {
+                    do_optimize(function(err, res_optimize) {
+                        if (err) {
+                            throw err;
+                        } else {
+                            do_save();
+                        }
+                    })
+                    
+                    
+                } else {
+                    do_save();
+                }
+                
+                
+                // and this could also allow options and optimizations.
+                //  but that could be 'export'? may need to make a copy before saving with lossy options.
+                
+                // stream in a sig as S?
+                
+                
+                
+                // don't think callback is needed because we can detect when the stream ends.
+                
+                
+            }),
             
-            'save_to_disk': function(dest_path, callback) {
+            // will take optimizations here.
+            //  will do the optimizations on the PNG before saving.
+            
+            
+            
+            'save_to_disk': fp(function(a, sig) {
+                var dest_path, options = {}, callback;
+                
+                
+                if (sig == '[s,f]') {
+                    dest_path = a[0];
+                    callback = a[1];
+                }
+                if (sig == '[s,o,f]') {
+                    dest_path = a[0];
+                    options = a[1];
+                    callback = a[2];
+                }
+                
+                // then will carry out optimization if there is more to do.
+                
+                // then check for particulat optimizations to do.
+                
+                var optimize = {} || options.optimize;
+                
                 // saves the compressed scanlines, with all the metadata.
+                
+                // an optimize option will select optimal scanline filters.
+                // perhaps the optimizations in an array?
+                
+                // can have options - options like optimize_scanline_filters
+                //  and possibly different optimization levels.
+                
+                // or optimize: 'best'
+                //  would carry out palette reduction if appropriate.
+                
+                // optimize: {'scanline_filters': 'best'}
+                
+                // optimize_scanline_filters: 'best' || 'good'
+                // true = best?
+                /*
+                var do_optimize = function(callback) {
+                    if (optimize.scanline_filters) {
+                        // then do the optimization?
+                        // or just tell it to do the optimization in the options.
+                        
+                        
+                    }
+                    
+                }
+                */
+                var that = this;
+                
+                
+                var do_save = function() {
+                    //var that = this;
+                    // save_to_stream
+                
+                    var stream = fs.createWriteStream(dest_path, {flags: 'w'});
+                    //throw 'stop';
+                    //stream.on('end', function() {
+                    stream.on('close', function() {
+                    
+                        //throw 'stop';
+                        callback(null, that);
+                    });
+                    that.save_to_stream(stream, options);
+                }
+                
+                do_save();
+                
                 // this does not change the filter used on scanlines, but we may want to reencode scanlines after having changed
                 //  unencoded scanlines.
                 
@@ -2131,18 +2700,8 @@ PNG compression method 0
                 
                 // create a write buffer
                 //  the various parts will be saved
-                var that = this;
-                // save_to_stream
                 
-                var stream = fs.createWriteStream(dest_path, {flags: 'w'});
-                
-                stream.on('end', function() {
-                    callback(null, that);
-                });
-                
-                that.save_to_stream(stream);
-                
-            },
+            }),
             
             
             // Want it so that it can load directly from a stream.
@@ -2364,7 +2923,7 @@ PNG compression method 0
                     //pending_chunk_reads++;
                 
                     var chunk_length = chunk_buffer.readUInt32BE(0);
-                    console.log('IDAT chunk_length ' + chunk_length);
+                    //console.log('IDAT chunk_length ' + chunk_length);
                     
                     var idx_data_start = 8;
                     var idx_data_end = idx_data_start + chunk_length;
@@ -2404,7 +2963,6 @@ PNG compression method 0
                             on_chunk_read_complete();                                            
                         }
                     })
-                    
                     */
                     deflated_length += buffer_deflated.length;
                     idat_content_buffers.push(buffer_deflated);
@@ -2445,17 +3003,17 @@ PNG compression method 0
                             buffer_inflated.copy(that.scanlines_buffer, that.scanlines_buffer_write_pos);     
                             that.scanlines_buffer_write_pos = that.scanlines_buffer_write_pos + buffer_inflated.length;
                                 
-                            
                             num_processing--;
                             //pending_chunk_reads--;
                             //on_chunk_read_complete();
                             
-                            console.log('finished loading image');
+                            //console.log('finished loading image');
+                            // No need to do this on load I think.
+                            //that.ensure_unfiltered_scanlines_buffer();
                             
                             callback(null, that);                                       
                         }
                     })
-                    
                     //on_chunk_read_complete();
                 }
                 
@@ -2528,7 +3086,7 @@ PNG compression method 0
                 var ctu = true;
                 while (ctu && next_chunk_pos < buffer.length) {
                     chunk_beginning_pos = next_chunk_pos;
-                    console.log('chunk_beginning_pos ' + chunk_beginning_pos);
+                    //console.log('chunk_beginning_pos ' + chunk_beginning_pos);
                     // copy that chunk into a buffer and give it to the chunk comprehension.
                     var chunk_length = buffer.readUInt32BE(chunk_beginning_pos);
                     //console.log('chunk_length ' + chunk_length);
@@ -2554,7 +3112,6 @@ PNG compression method 0
                     }
                 }
                 data_num++;
-                
             },
             
             // another function could deal with recieving / streaming in the PNG.
@@ -2601,18 +3158,13 @@ PNG compression method 0
                     var image_buffer = Buffer.concat(buffers, bytes_read);
                     that.load_from_buffer(image_buffer, function() {
                         callback(null, that);
-                    });
-                    
+                    }); 
                 });
-                
-                
             },
-            
             
             // load_from_stream_evented
             //  would have events / functions that get called when it has recieved certain data.
             //   a more complex version of the function I think.
-                        
             
             'load_from_disk': function(source_path, callback) {
                 // don't need to get the size first... it counts the bytes received in the stream.
@@ -2625,461 +3177,16 @@ PNG compression method 0
                     } else {
                         var src = fs.createReadStream(source_path);
                         that.load_from_stream(src, callback);
-                        
                     }
                 });
-                    
-                
-            },
-
-            
-            '_load_from_disk': function(source_path, callback) {
-                // loads the whole PNG buffer
-                //  then holds the PNG pixels.
-                
-                // will hold the pixels in a buffer... but it needs to be aware of how
-                //  they are held - either indexed color, or the actual colors.
-                
-                // will hold the palette
-                
-                // Likely to have to read pixels to an internal data structure...
-                //  or make available the data structure that they are stored with using an
-                //  API.
-                
-                // store the whole contents of the PNG in _buffer.
-                // load the whole thing into the buffer???
-                
-                var that = this;
-                
-                // size of the pixel buffer...
-                //  will depend on the color mode.
-                
-                fs.stat(source_path, function(err, stats) {
-					if (err) {
-						
-					} else {
-						var size = stats.size;
-						
-						//console.log('size ' + size);
-                        
-                        fs.open(source_path, 'r', function(err, fd) {
-                            if (err) {
-                                
-                            } else {
-                                var src = fs.createReadStream(source_path);
-                                
-                                // but we may want to close the stream after getting the metadata.
-                                //  that would make for a very fast metadata getter.
-                                
-                                // var open_chunks = 0;'
-                                
-                                // but a callback for when chunks have finished being processed?
-                                
-                                // don't want the callback until it's done.
-                                // let's process the chunks in order.
-                                
-                                // And when we don't know the size?
-                                //  We need to read to the end of the input buffer.
-                                
-                                
-                                
-                                
-                                
-                                
-                                var png_buffer = new Buffer(size);
-                                var png_pos = 0;
-                                
-                                // storing the previous data buffer as well...
-                                var data_num = 0;
-                                var chunk_positions_in_full_data = [];
-                                
-                                var color_type;
-                                var bit_depth;
-        
-                                var colors = [];
-                                var trans;
-                                
-                                var colors_with_alpha = [];
-                                
-                                var pending_chunk_reads = 0;
-                                
-                                var on_chunk_read_complete = function() {
-                                    if (pending_chunk_reads == 0) {
-                                        //console.log('chunk read complete');
-                                        //console.log('pending_chunk_reads ' + pending_chunk_reads);
-                                        callback(that);
-                                    }
-                                }
-                                
-                                // Async buffer processing?
-                                
-                                var found_IHDR_chunk = function(chunk_buffer) {
-                                
-                                
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('IHDR chunk_length ' + chunk_length);
-                                    
-                                    // extract various values from it.
-                                    // could set them in an FSM.
-                                    
-                                    var img_width = chunk_buffer.readUInt32BE(8);
-                                    var img_height = chunk_buffer.readUInt32BE(12);
-                                    
-                                    //console.log('img_width ' + img_width);
-                                    //console.log('img_height ' + img_height);
-                                    
-                                    bit_depth = chunk_buffer.readUInt8(16);
-                                    color_type = chunk_buffer.readUInt8(17);
-                                    var compression_method = chunk_buffer.readUInt8(18);
-                                    var filter_method = chunk_buffer.readUInt8(19);
-                                    var interlace_method = chunk_buffer.readUInt8(20);
-                                    
-                                    that.size = [img_width, img_height]
-                                    that.bit_depth = bit_depth;
-                                    that.color_type = color_type;
-                                    that.compression_method = compression_method;
-                                    
-                                    
-                                    // calculate the size of the image data buffer.
-                                    //  will hold the indexed pixel data if needed.
-                                    
-                                    // calculate the scanline length here.
-                                    
-                                    // depends on the bit depth... need to get the right scanline length.
-                                    
-                                    var scanline_image_data_length;
-                                    
-                                    // and depends on the color mode.
-                                    
-                                    if (bit_depth == 1) {
-                                        scanline_image_data_length = Math.ceil(that.size[0] / 8);
-                                    }
-                                    if (bit_depth == 2) {
-                                        scanline_image_data_length = Math.ceil(that.size[0] / 4);
-                                    }
-                                    if (bit_depth == 4) {
-                                        scanline_image_data_length = Math.ceil(that.size[0] / 2);
-                                    }
-                                    if (bit_depth == 8) {
-                                        if (color_type == 2) {
-                                            scanline_image_data_length = that.size[0] * 3;
-                                        } else if (color_type == 6) {
-                                            scanline_image_data_length = that.size[0] * 4;
-                                        }
-                                    }
-                                    //console.log('scanline_image_data_length ' + scanline_image_data_length);
-                                    
-                                    // scanline_length depends on the number of bits per pixel.
-                                    
-                                    var scanline_length = scanline_image_data_length + 1;
-                                    
-                                    that.scanline_image_data_length = scanline_image_data_length;
-                                    that.scanline_length = scanline_length;
-                                    
-                                    var scanlines_buffer_length = that.scanline_length * that.size[1];
-                                    that.scanlines_buffer_length = scanlines_buffer_length;
-                                    
-                                    var scanlines_buffer = new Buffer(scanlines_buffer_length);
-                                    that.scanlines_buffer = scanlines_buffer;
-                                    
-                                    that.scanlines_buffer_write_pos = 0;
-                                    
-                                    //console.log('scanlines_buffer_length ' + scanlines_buffer_length);
-                                    
-                                    // buf.copy(targetBuffer, [targetStart], [sourceStart], [sourceEnd])
-                                    
-                                    // create the buffer for the scanline data that is needed.
-                                    
-                                    //found_metadata(obj_metadata);
-                                    //src.pause();
-                                    //src.destroy();
-                                }
-                                
-                                var found_gAMA_chunk = function(chunk_buffer) {
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('gAMA chunk_length ' + chunk_length);
-                                    
-                                    var value = chunk_buffer.readUInt32BE(8);
-                                    
-                                    //console.log('value ' + value);
-                                }
-                                
-                                var found_PLTE_chunk = function(chunk_buffer) {
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('PLTE chunk_length ' + chunk_length);
-                                    
-                                    // then we get the chunk data... all the colors
-                                    
-                                    var num_colors = chunk_length / 3;
-                                    //console.log('num_colors ' + num_colors);
-                                    
-                                    // then parse the individual colors.
-                                    
-                                    var c = 0;
-                                    var color_begin_pos = 8;
-                                    while (c < num_colors) {
-                                        // the color is stored as 4 1 byte values.
-                                        //  but the info about color locations could be parsed out?
-                                        //  in this situation, we want the colors from the pallet.
-                                        
-                                        var color = [chunk_buffer.readUInt8(color_begin_pos), chunk_buffer.readUInt8(color_begin_pos + 1), chunk_buffer.readUInt8(color_begin_pos + 2)];
-                                        colors.push(color);
-                                        
-                                        
-                                        color_begin_pos = color_begin_pos + 3;
-                                        
-                                        c++;
-                                    }
-                                    that.palette = colors;
-                                    
-                                    //console.log('colors ' + stringify(colors));
-                                    //console.log('colors.length ' + stringify(colors.length));
-                                    
-                                }
-                                
-                                var found_tRNS_chunk = function(chunk_buffer) {
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('tRNS chunk_length ' + chunk_length);
-                                    
-                                    //var value = chunk_buffer.readUInt32BE(8);
-                                    
-                                    //console.log('value ' + value);
-                                    if (color_type == 3) {
-                                        // then we read in all the color values.
-                                        trans = [];
-                                        for (var c = 8; c < 8 + chunk_length; c++) {
-                                            var alpha = chunk_buffer.readUInt8(c);
-                                            //console.log('alpha ' + alpha);
-                                            trans.push(alpha);
-                                        }
-                                        
-                                        // then create the colors with alpha values.
-                                        
-                                        each(colors, function(i, v) {
-                                            if (is_defined(trans[i])) {
-                                                var color_with_alpha = [v[0], v[1], v[2], trans[i]];
-                                                colors_with_alpha.push(color_with_alpha);
-                                            } else {
-                                                var color_with_alpha = [v[0], v[1], v[2], 255];
-                                                colors_with_alpha.push(color_with_alpha);
-                                            };
-                                            
-                                            //var color_with_alpha = [v[0], v[1], v[2], ]
-                                        });
-                                        //console.log('colors_with_alpha ' + stringify(colors_with_alpha));
-                                        
-                                        that.palette_with_alphas = colors_with_alpha;
-                                        
-                                    }
-                                    
-                                }
-                                
-                                var found_IDAT_chunk = function(chunk_buffer) {
-                                    pending_chunk_reads++;
-                                
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('IDAT chunk_length ' + chunk_length);
-                                    
-                                    // Then has the data been compressed with deflate?
-                                    
-                                    // Let's have it decompress the data.
-                                    
-                                    // Need to have it decompress the right data from the buffer
-                                    
-                                    // need to get the filter methods for lines.
-                                    
-                                    var idx_data_start = 8;
-                                    var idx_data_end = idx_data_start + chunk_length;
-                                    
-                                    //var inflate = zlib.createInflate();
-                                    
-                                    // inflate it to a stream or buffer?
-                                    
-                                    var buffer_deflated = new Buffer(chunk_length);
-                                    chunk_buffer.copy(buffer_deflated, 0, idx_data_start, idx_data_end);
-                                    
-                                    // inflate is async... need to be careful about this.
-                                    //  so this parsing happens after the IEND chunk has been read.
-                                    //  so, likely to have a callback that occurrs when every inflation has been done.
-                                    zlib.inflate(buffer_deflated, function(err, buffer_inflated) {
-                                        //console.log('err ' + err);
-                                        //console.log('res ' + res);
-                                        if (err) {
-                                            
-                                        } else {
-                                            //console.log('buffer_inflated.length ' + buffer_inflated.length);
-                                            buffer_inflated.copy(that.scanlines_buffer, that.scanlines_buffer_write_pos);     
-                                            that.scanlines_buffer_write_pos = that.scanlines_buffer_write_pos + buffer_inflated.length;
-                                                
-                                            
-                                            pending_chunk_reads--;
-                                            on_chunk_read_complete();                                            
-                                        }
-                                    })
-                                }
-                                
-                                var found_IEND_chunk = function(chunk_buffer) {
-                                    
-                                    // then the image is finished.
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('IEND chunk_length ' + chunk_length);
-                                    
-                                    // let's do the callback, returning the palette data.
-                                    
-                                    //callback(that);
-                                    
-                                    on_chunk_read_complete();  
-                                    
-                                }
-                                
-                                var found_chunk = function(chunk_buffer) {
-                                    
-                                    // interpret the chunk, and raise an event for having found that kind of chunk.
-                                    
-                                    var chunk_length = chunk_buffer.readUInt32BE(0);
-                                    //console.log('chunk_length ' + chunk_length);
-                                    
-                                    var chunk_type = chunk_buffer.toString('ascii', 4, 8);
-                                    //console.log('* chunk_type ' + chunk_type + '  ');
-                                    
-                                    // beginning of the chunk data, end of chunk data
-                                    //  From the chunk buffer.
-                                    //  Not sure we really need a chunk buffer anyway, but maybe buffer is more suitable than string for various things.
-                                    
-                                    var idx_chunk_data_beginning = 8;
-                                    var idx_chunk_data_ending = idx_chunk_data_beginning + chunk_length - 8;
-                                    
-                                    var chunk_crc = chunk_buffer.readUInt32BE(idx_chunk_data_ending);
-                                    
-                                    if (chunk_type == 'IHDR') {
-                                        found_IHDR_chunk(chunk_buffer);
-                                    }
-                                    
-                                    if (chunk_type == 'gAMA') {
-                                        found_gAMA_chunk(chunk_buffer);
-                                    }
-                                    if (chunk_type == 'PLTE') {
-                                        found_PLTE_chunk(chunk_buffer);
-                                    }
-                                    if (chunk_type == 'tRNS') {
-                                        found_tRNS_chunk(chunk_buffer);
-                                    }
-                                    if (chunk_type == 'IDAT') {
-                                        found_IDAT_chunk(chunk_buffer);
-                                    }
-                                    if (chunk_type == 'IEND') {
-                                        found_IEND_chunk(chunk_buffer);
-                                    }
-                                    
-                                }
-                                
-                                var incomplete_chunk_buffer = false;
-                                
-                                src.on('data', function(data) {
-                                
-                                    // if we have an imcomplete chunk buffer, merge them.
-                                    if (incomplete_chunk_buffer) {
-                                        var new_data = new Buffer(incomplete_chunk_buffer.length + data.length);
-                                        
-                                        incomplete_chunk_buffer.copy(new_data, 0, 0, incomplete_chunk_buffer.length);
-                                        data.copy(new_data, incomplete_chunk_buffer.length, 0, data.length);
-                                        data = new_data;
-                                        incomplete_chunk_buffer = false;
-                                    }
-                                    
-                                    //console.log('data_num ' + data_num);
-                                    //console.log('');
-                                    //png_pos
-                                    
-                                    // move through the data... we'll keep in sync with the chunks.
-                                    
-                                    if (data_num == 0) {
-                                        // we start by finding the PNG signature and the first chunk.
-                                        chunk_beginning_pos = 8;
-                                        var chunk_length = data.readUInt32BE(chunk_beginning_pos);
-                                        //console.log('chunk_length ' + chunk_length);
-                                        
-                                        // make a new chunk buffer and read that chunk into the buffer
-                                        //  check there is enough space left in the current buffer.
-                                        
-                                        var buf_chunk = new Buffer(chunk_length + 12);
-                                        var next_chunk_pos = chunk_beginning_pos + 12 + chunk_length;
-                                        
-                                        // check that it's within the bounds of the data... otherwise don't write it.
-                                        //  otherwise will write an incomplete buffer.
-                                        data.copy(buf_chunk, 0, chunk_beginning_pos, next_chunk_pos);
-                                        
-                                        found_chunk(buf_chunk);
-                                        // then read everything from the chunk into chunk data.
-                                    }
-                                    
-                                    var ctu = true;
-                                    while (ctu && next_chunk_pos < data.length) {
-                                        chunk_beginning_pos = next_chunk_pos;
-                                        //console.log('chunk_beginning_pos ' + chunk_beginning_pos);
-                                        // copy that chunk into a buffer and give it to the chunk comprehension.
-                                        var chunk_length = data.readUInt32BE(chunk_beginning_pos);
-                                        //console.log('chunk_length ' + chunk_length);
-                                        
-                                        // chunk_end_position_in_read_buffer
-                                        
-                                        var chunk_end_position_in_read_buffer = chunk_beginning_pos + chunk_length + 12
-                                        
-                                        if (chunk_end_position_in_read_buffer > data.length) {
-                                            // need to copy this into the temporary buffer
-                                            //  buffer for incomplete chuncks that have been read.
-                                            incomplete_chunk_buffer = new Buffer(data.length - chunk_end_position_in_read_buffer);
-                                            data.copy(incomplete_chunk_buffer, 0, chunk_beginning_pos, data.length);
-                                            ctu = false;
-                                            
-                                        } else {
-                                            var buf_chunk = new Buffer(chunk_length + 12);
-                                            var next_chunk_pos = chunk_end_position_in_read_buffer;
-                                            //console.log('next_chunk_pos ' + next_chunk_pos);
-                                            
-                                            data.copy(buf_chunk, 0, chunk_beginning_pos, next_chunk_pos);
-                                            found_chunk(buf_chunk);
-                                        }
-                                    }
-                                    data_num++;
-                                });
-        
-                                // the reading is finished...
-                                src.on('close', function () {
-                                    // It should have been processing the data recieved.
-                                    
-                                    //writeStream.end(); // ...close up the write, too!
-                                    console.log("src finished.");
-                                });
-                                
-                                
-                                /*
-                                
-                                fs.read(fd, png_input_buffer, 0, 30, 0, function(err, num_bytes_read, buffer) {
-                                    if (err) {
-                                        
-                                    } else {
-                                        console.log('buffer === png_input_buffer ' + buffer === png_input_buffer);
-                                        
-                                        // the buffer of pixels that has been read in...
-                                        
-                                        // bytesread... a string I think.
-                                        console.log('num_bytes_read ' + stringify(num_bytes_read));
-                                        
-                                        // and the data should be in the png input buffer.
-                                        
-                                        //  want to read a chunk from the buffer.
-                                        
-                                    }
-                                    
-                                })
-                                */
-                            }
-                        })
-                    }
-                });
-                
             }
+            
+            // count_rgb_colors
+            //  possibly iterate pixels, possibly go through the unfiltered scanline buffer.
+            
+            
+            
+            
             
         })
         
@@ -3093,11 +3200,6 @@ PNG compression method 0
         //  write to an output stream?
         
         // will give that more thought.
-        
-        
-        
-        
-        
         
         var load_from_disk = function(source_path, callback) {
             var res = new PNG({});
@@ -3232,7 +3334,6 @@ PNG compression method 0
                                     data = new_data;
                                     incomplete_chunk_buffer = false;
                                 }
-                                
                             
                                 //console.log("Found some data! data.length " + data.length);
                                 //  that is the amount in the buffer...
@@ -3293,7 +3394,6 @@ PNG compression method 0
                                         found_chunk(buf_chunk);
                                     }
                                 }
-                                
                                 data_num++;
                               //writeStream.write(textData);
                             });
@@ -3301,42 +3401,100 @@ PNG compression method 0
                             // the reading is finished...
                             src.on('close', function () {
                                 // It should have been processing the data recieved.
-                                
                                 //writeStream.end(); // ...close up the write, too!
                                 console.log("src finished.");
                             });
-                            
                         }
                     })
                 }
             });
         }
+        // could have a faster streaming loader.
+        //  would do the specific loading algorithm.
+        
+        // this would go through, unfiltering scanlines.
         
         var load_rgba_pixel_buffer_from_disk = function(source_path, callback) {
-            console.log('jsgui-node-png ' + load_rgba_pixel_buffer_from_disk);
+            console.log('load_rgba_pixel_buffer_from_disk');
             load_from_disk(source_path, function(err, res_png) {
                 if (err) {
                     var stack = new Error().stack;
                     console.log(stack);
                     throw err;
                 } else {
-                    console.log('png load_rgba_pixel_buffer_from_disk');
+                    // will use:
+                    //  var uf_slb = this.get_unfiltered_scanline_buffer(y);
+                    //console.log('png load_rgba_pixel_buffer_from_disk loaded from disk');
+                    console.log('pre get pixel buffer from png');
+                    // I think this may be the slow part...
+                    //  seems like loading the png itself is fairly fast. Getting the pixel buffer is the part that creates the new unfilteres scanline buffers,
+                    //   would be faster just to have an unfiltered_scanlines_buffer.
                     var rgba32_buffer = res_png.get_rgba_pixel_buffer();
+                    console.log('post get pixel buffer from png');
                     
-                    console.log('got rgba32_buffer');
+                    //console.log('got rgba32_buffer');
                     callback(null, rgba32_buffer);
-                    
                 }
             })
         };
         
-        var save_rgba_pixel_buffer_to_disk = function(rbga_buffer, dest_path, callback) {
+        var save_rgba_pixel_buffer_to_disk = fp(function(a, sig) {
+            // need to have Buffer as a type in signatures.
+            //  Think it will be B.
+            
+            // rbga_buffer, dest_path, callback
+            
+            var rbga_buffer, dest_path, options = {}, callback;
+            //console.log('sig ' + sig);
+            //throw 'stop';
+            
+            if (sig == '[o,s,f]') {
+                rbga_buffer = a[0];
+                dest_path = a[1];
+                callback = a[2];
+            }
+            
+            if (sig == '[o,s,o,f]') {
+                rbga_buffer = a[0];
+                dest_path = a[1];
+                options = a[2];
+                callback = a[3];
+            }
+            
+            var scanline_encoding = false;
+            var optimize = false;
+            
+            if (options.scanline_encoding) {
+                scanline_encoding = options.scanline_encoding;
+                
+            }
+            if (options.optimize) {
+                optimize = options.optimize;
+                
+            }
+            
+            
+            
+            
+            
+        
+            // rbga_buffer, dest_path, callback
+            
             // open the png from the rgba_pixel_buffer
             //  save the png.
             // could do this quickly by copying into the scanline buffer, with the scanline filter set to 0
             
+            // I think we will have some optional options.
+            //  Options will include the scanline filtering to use, or the optimization.
+            //  We want it so that a PNG can save itself using chosen scanline filters that are optimal.
+            //  Could run deflate on each row to find out which is the best per row, but also want to be able to
+            //   have the scanline filter set for the whole image. 
+            
+            
+            
             var color_type;
             var bytes_per_pixel;
+            var bit_depth = 8;
             
             if (rbga_buffer.bits_per_pixel == 24) {
                 color_type = 2;
@@ -3347,17 +3505,20 @@ PNG compression method 0
                 bytes_per_pixel = 4;
             }
             
-            var png = new PNG({'size': rbga_buffer.size, 'color_type': color_type});
+            var png = new PNG({'size': rbga_buffer.size, 'color_type': color_type, 'bit_depth': bit_depth});
             // iterating pixels is easiest?
             
             // I think direct copying is best.
-            console.log('rbga_buffer ' + rbga_buffer);
+            //console.log('rbga_buffer ' + rbga_buffer);
             var w = rbga_buffer.size[0];
             var h = rbga_buffer.size[1];
             // calculate the positions - the buffer to copy from, buffer to copy to.
             //  will be writing directly to the scanline buffer.
             var source_buffer = rbga_buffer.buffer;
-            var dest_buffer = png.buffer;
+            
+            var dest_buffer = png.scanlines_buffer;
+            
+            // put it in the unfiltered scanlines buffer?
             
             var source_buffer_line_length = w * bytes_per_pixel;
             
@@ -3367,19 +3528,69 @@ PNG compression method 0
             var source_buffer_line_start, source_buffer_line_end;
             var dest_buffer_line_start;
             
+            //var dest_buffer_writeUInt8 = dest_buffer.writeUInt8;
+            //var source_buffer_copy = source_buffer.copy;
+            
+            // if we do scanline encoding, we want to write to the unfiltered buffer.
+            //  will do tracking of meta-scanline encoding, so we can keep the image encoded or not.
+            //  may specify optimizing scanline encoding.
+            //  but we do want to have some sort of scanline encoding running.
+            
+            // want to be able to load data into an image, then have it encoded upon save.
+            
+            if (scanline_encoding) {
+                // not 0 or false
+                console.log('scanline_encoding ' + scanline_encoding);
+                if (!png.unfiltered_scanlines_buffer) {
+                    png.unfiltered_scanlines_buffer = new Buffer(png.scanlines_buffer.length);
+                }
+                
+                dest_buffer = png.unfiltered_scanlines_buffer;
+                
+            } else {
+                
+            }
+            
+            
+            
             for (var y = 0; y < h; y++) {
                 //png.buffer;
                 source_buffer_line_start = y * source_buffer_line_length;
                 source_buffer_line_end = source_buffer_line_start + source_buffer_line_length;
-                
+            
                 dest_buffer_line_start = y * dest_buffer_line_length;
                 //buf.copy(targetBuffer, [targetStart], [sourceStart], [sourceEnd])
-                source_buffer.copy(dest_buffer, dest_buffer_line_start, source_buffer_line_start, source_buffer_line_end);
+            
+            
+                dest_buffer.writeUInt8(0, dest_buffer_line_start);
+                source_buffer.copy(dest_buffer, dest_buffer_line_start + 1, source_buffer_line_start, source_buffer_line_end);
+            }
+            
+            
+            if (scanline_encoding != false) {
+                if (tof(scanline_encoding) == 'number') {
+                    png.set_scanline_filter_all_rows(scanline_encoding);
+                    png.filter_all_scanlines();
+                }
+                
+            }
+            
+            if (optimize) {
+                png.ensure_unfiltered_scanlines_buffer();
+                png.optimize_filter_all_scanlines(function(err, res) {
+                    if (err) {
+                        throw err;
+                    } else {
+                        png.save_to_disk(dest_path, callback);
+                    }
+                })
+            } else {
+                png.save_to_disk(dest_path, callback);
             }
             
             // png.load_scanline_from_
-            png.save_to_disk(dest_path, callback);
-        }
+            
+        })
         
         var png = {
             'load_metadata_from_disk': load_metadata_from_disk,

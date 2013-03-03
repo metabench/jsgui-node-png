@@ -4,7 +4,7 @@ if (typeof define !== 'function') {
 
 define(['jsgui-lang-essentials', 'fs', '../jsgui-node-png'], 
     function(jsgui, fs, jsgui_png) {
-        
+        var stringify = jsgui.stringify;
         //var source_file = './source/pliers2.png';
         var source_file = './source/f00n2c08.png';
         
@@ -34,6 +34,32 @@ define(['jsgui-lang-essentials', 'fs', '../jsgui-node-png'],
                 
             })
         }
-        test_load_png_iterate();
+        //test_load_png_iterate();
+        
+        
+        var test_load_png_to_rgba_buffer_save_as_png = function() {
+            
+            var source_path = './source/pngsuite/f00n2c08.png';
+            var dest_path = './res/f00n2c08.png';
+        
+            jsgui_png.load_rgba_pixel_buffer_from_disk(source_path, function(err, pix_buf) {
+                if (err) {
+                    throw err;
+                } else {
+                    console.log('loaded rgba pixel buffer');
+                    console.log('buffer resolution: ' + stringify(pix_buf.size));
+                    
+                    jsgui_png.save_rgba_pixel_buffer_to_disk(pix_buf, dest_path, function() {
+                        console.log('save callback');
+                    });
+                }
+            
+            });
+            
+            
+            
+        }
+        test_load_png_to_rgba_buffer_save_as_png();
+        
     }
 );
