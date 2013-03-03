@@ -18,7 +18,7 @@ if (typeof define !== 'function') {
 
 
 
-define(['./jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', './jsgui-node-pixel-buffer'], 
+define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-buffer'], 
     function(jsgui, fs, zlib, CrcStream, Pixel_Buffer) {
         
         var stringify = jsgui.stringify, each = jsgui.each, is_defined = jsgui.is_defined;
