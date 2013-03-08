@@ -20,7 +20,7 @@
     "amdefine": ">=0.0.4"
   },
   "author": "James Vickers <james@metabench.com>",
-  "description": "jsgui - PNG module. Load, save, use scanline filters, supports 32bpp rgba, 24bpp rgb, and 1, 2, 4 and 8 bpp indexed color.",
+  "description": "jsgui - PNG module. Load, save, use scanline filters, supports 32bpp rgba, 24bpp rgb, and 1, 2, 4 and 8 bpp indexed color. Optimizes the selection of scanline filters when saving.",
   "contributors": [ 
     {
       "name": "James Vickers",
