@@ -42,16 +42,16 @@ The callback is called with parameters, (err, res). The res (result) parameter i
 
 ###save_to_stream(writable_stream, [options], callback)
 #####options object
-Value Name     | Data type    |  Description   |  Notes
-------------   | ------------- 
-optimize           | string | 'best' &#124; 'fast' | Currently 'best' is recommended
+Value Name         | Data type    |  Description         |  Notes
+-------------------|--------------|----------------------|--------
+optimize           | string       | 'best' &#124; 'fast' | Currently 'best' is recommended
 
 ###save_to_disk(file_path, [options], callback)
 Saves the PNG to the file system.
 #####options object
-Value Name     | Data type    |  Description   |  Notes
-------------   | ------------- 
-optimize           | string | 'best' &#124; 'fast' | Currently 'best' is recommended
+Value Name         | Data type    |  Description         |  Notes
+-------------------|--------------|----------------------|--------
+optimize           | string       | 'best' &#124; 'fast' | Currently 'best' is recommended
 
 
 ###load_from_buffer(buffer, callback)
@@ -79,10 +79,10 @@ The callback is called with parameters (err, pixel_buffer)
 ###save_rgba_pixel_buffer_to_disk(dest_path, [options], callback)
 Saves an rgba Pixel_Buffer to disk in the PNG format.
 #####options object
-Value Name     | Data type    |  Description   |  Notes
-------------   | ------------- 
-scanline_encoding           | number | The number representing the scanline filter that is to be used for all scanlines (rows) in the image. | This takes less time than using the 'optimize' option, and using a set scanline filter (such as 1, 2, 3 or 4) can provide a good level of compression.
-optimize           | string | 'best' &#124; 'fast' | Currently 'best' is recommended. 
+Value Name              | Data type    |  Description   |  Notes
+------------------------|--------------|----------------|------------
+scanline_encoding       | number       | The number representing the scanline filter that is to be used for all scanlines (rows) in the image. | This takes less time than using the 'optimize' option, and using a set scanline filter (such as 1, 2, 3 or 4) can provide a good level of compression.
+optimize                | string       | 'best' &#124; 'fast' | Currently 'best' is recommended. 
 
 ### Low level API
 ###PNG Class
