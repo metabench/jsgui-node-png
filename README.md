@@ -34,9 +34,9 @@ Gets a jsgui-node-pixel-buffer object containing the image. That representation 
 ###optimize_filter_all_scanlines([options], callback)
 Optimizes the PNG by selecting the scanline filters for each scanline in the image with the aim of producing the best compression when the image is compressed using deflate, which is the standard compression for the PNG format.
 #####options object
-Value Name     | Data type    |  Description   |  Notes
-------------   | ------------- 
-optimize           | string | 'best' &#124; 'fast' | Currently 'best' is recommended
+Value Name         | Data type    |  Description         |  Notes
+-------------------|--------------|----------------------|--------
+optimize           | string       | 'best' &#124; 'fast' | Currently 'best' is recommended
 
 The callback is called with parameters, (err, res). The res (result) parameter is set to true on successful completion of the function.
 
