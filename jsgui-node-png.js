@@ -1,8 +1,22 @@
 if (typeof define !== 'function') {
     var define = require('amdefine')(module);
 }
+// could also use image_buffer...
+//  will get a new image_buffer from a PNG.
 
-// Not yet supporting greyscale, need to do more work on indexed color modes.
+//  will also load an image_buffer from 
+
+// May need more work on PNGs with palettes.
+//  Have been working on truecolor 32 and 24 and filter handling.
+
+// Faster choice of optimized scanline filters would be good as well.
+//  Calling node's deflate on each scanline is a bit slow.
+//  Thinking about counting unique 4 byte words (readUInt32 results).
+//   Then the one with least variation would be the one to use.
+
+// PNGs are coming along nicely... but want the main JSGUI server to run.
+
+
 
 define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-buffer'], 
     function(jsgui, fs, zlib, CrcStream, Pixel_Buffer) {
@@ -11,6 +25,8 @@ define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-
         var fp = jsgui.fp, tof = jsgui.tof;
         var Fns = jsgui.Fns;
         var arrayify = jsgui.arrayify;
+        
+        
         
         //var get_deflated_length = arrayify(function(buffer, callback) {
         var get_deflated_length = (function(buffer, callback) {
@@ -40,18 +56,21 @@ define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-
             deflate.end(buffer);
         });
         
+        
+        
+        
         /*
 
 PNG starts with an 8 byte signature
 
-137	    A byte with its most significant bit set (``8-bit character'')
-80	    P
-78  	N
-71	    G
-13	    Carriage-return (CR) character, a.k.a. CTRL-M or ^M
-10	    Line-feed (LF) character, a.k.a. CTRL-J or ^J
-26	    CTRL-Z or ^Z
-10	    Line-feed (LF) character, a.k.a. CTRL-J or ^J
+137     A byte with its most significant bit set (``8-bit character'')
+80      P
+78      N
+71      G
+13      Carriage-return (CR) character, a.k.a. CTRL-M or ^M
+10      Line-feed (LF) character, a.k.a. CTRL-J or ^J
+26      CTRL-Z or ^Z
+10      Line-feed (LF) character, a.k.a. CTRL-J or ^J
 
 137, 80, 78, 71, 13, 10, 26, 10
 
@@ -75,36 +94,36 @@ PNG color options
 
 Bits per pixel
 --------------
-Color option	Channels	Bits per channel
-                    1	2	4	8	16
-Indexed	            1	1	2	4	8	
-Grayscale	        1	1	2	4	8	16
-Grayscale & alpha	2				16	32
-Truecolor	        3				24	48
-Truecolor & alpha	4				32	64
+Color option    Channels    Bits per channel
+                    1   2   4   8   16
+Indexed             1   1   2   4   8   
+Grayscale           1   1   2   4   8   16
+Grayscale & alpha   2               16  32
+Truecolor           3               24  48
+Truecolor & alpha   4               32  64
 
 
 PNG color types
 ---------------
 Color
-type	Name	Binary	Masks
- 	A	C	P
-0	Grayscale   	                0	0	0	0	 
-1	(Indexed grayscale)	            0	0	0	1	palette
-2	Truecolor	                    0	0	1	0	color
-3	Indexed	                        0	0	1	1	palette
-4	Grayscale & alpha       	    0	1	0	0	alpha
-5	(Indexed grayscale & alpha)	    0	1	0	1	palette
-6	Truecolor & alpha	            0	1	1	0	color
-7	(Indexed & alpha)	            0	1	1	1	color | palette
+type    Name    Binary  Masks
+    A   C   P
+0   Grayscale                       0   0   0   0    
+1   (Indexed grayscale)             0   0   0   1   palette
+2   Truecolor                       0   0   1   0   color
+3   Indexed                         0   0   1   1   palette
+4   Grayscale & alpha               0   1   0   0   alpha
+5   (Indexed grayscale & alpha)     0   1   0   1   palette
+6   Truecolor & alpha               0   1   1   0   color
+7   (Indexed & alpha)               0   1   1   1   color | palette
 
 
-Type byte	Filter name	Predicted value
-0	        None	    Zero (so that the raw byte value passes through unaltered)
-1	        Sub	        Byte A (to the left)
-2	        Up	        Byte B (above)
-3	        Average	    Mean of bytes A and B, rounded down
-4	        Paeth	    A, B, or C, whichever is closest to p = A + B − C
+Type byte   Filter name Predicted value
+0           None        Zero (so that the raw byte value passes through unaltered)
+1           Sub         Byte A (to the left)
+2           Up          Byte B (above)
+3           Average     Mean of bytes A and B, rounded down
+4           Paeth       A, B, or C, whichever is closest to p = A + B − C
 
 PNG compression method 0 
 (the only compression method presently defined for PNG) specifies deflate/inflate compression with a 32K sliding window.
@@ -118,8 +137,7 @@ PNG compression method 0
         
             if (p_left <= p_above && p_left <= p_above_left) {
                 return left;
-            }
-            else if (p_above <= p_above_left) {
+            } else if (p_above <= p_above_left) {
                 return above;
             }
             return above_left;
@@ -754,8 +772,6 @@ PNG compression method 0
             'analyse_scanline_filter_method_get_compressed_size': fp(function(a, sig) {
                 // this function could be remade so that it gets compressed filter sizes for all of the different scanline filtering options,
                 
-                
-                
                 var scanline_num, scanline_filter_byte, options = {}, callback;
                 
                 //console.log('sig ' + sig);
@@ -865,27 +881,18 @@ PNG compression method 0
                 // deflate on each line seems best for the moment though.
                 
                 // best option at the moment is the scanline deflate test?
-                
                 // taking into consideration previous lines will help as well.
-                
-                
-                
                 
                 if (scanline_filter_byte == 0) {
                     // just copy it over to the scanlines_buffer
                     
                     // not sure if something needs to be done here... maybe.
-                    
                     // copy from unfiltered buffer to filtered buffer.
                     //this.unfiltered_scanlines_buffer
                     //console.log('this.unfiltered_scanlines_buffer ' + this.unfiltered_scanlines_buffer);
                     unfiltered_scanlines_buffer.copy(analysis_scanline_buffer, 0, scanline_start, scanline_start + this.scanline_length);
-                    
                     // it is the unfiltered value?
                     //  where do we get the various values from at this stage?
-                    
-                    
-                    
                     
                 }
                 
@@ -1138,7 +1145,7 @@ PNG compression method 0
                 var that = this;
                 
                 if (method == 'deflate') {
-                    console.log('deflate analyse_scanlines_predict_best_filters ');
+                    //console.log('deflate analyse_scanlines_predict_best_filters ');
                     that.analyse_scanlines_predict_best_filters({'method': method}, function(err, arr_predicted_best_scanline_filters) {
                         if (err) {
                             throw err;
@@ -2270,7 +2277,7 @@ PNG compression method 0
                 //console.log('set_color_parameters color_type ' + color_type);
                 //console.log('bit_depth ' + bit_depth);
                 //console.log('');
-                // 6	Truecolor & alpha
+                // 6    Truecolor & alpha
                 //  32 bpp, bit depth is 8 bits per channel.
                 
                 // color_type 2 (rgb truecolor), bit depth 8
@@ -2521,16 +2528,18 @@ PNG compression method 0
                 // stream
                 // stream, options
                 
-                if (sig == '[S]') {
+                //console.log('sig ' + sig);
+                //console.log('tof(a[0]) ' + tof(a[0]));
+                if (sig == '[W]') {
                     stream = a[0];
                 }
-                if (sig == '[S,o]') {
+                if (sig == '[W,o]') {
                     stream = a[0];
                     options = a[1];
                 }
                 
                 var optimize = options.optimize;
-                console.log('optimize ' + optimize);
+                //console.log('optimize ' + optimize);
                 //throw 'stop';
                 
                 var that = this;
@@ -2555,10 +2564,10 @@ PNG compression method 0
                         callback(null, true);
                     }
                     
-                    
                 }
                 
                 var do_save = function() {
+                    console.log('stream ' + stream);
                     var png_signature_buffer = that.get_signature_buffer();
                     var IHDR_buffer = that.get_buffer_IHDR();
                     that.get_buffer_IDAT(function(IDAT_buffer) {
@@ -2656,9 +2665,23 @@ PNG compression method 0
                 
                 var do_save = function() {
                     //var that = this;
+                    //console.log('do_save');
                     // save_to_stream
-                
+                    
+                    // Do we need to test for the stream methods / API?
+
+                    // tof with wave 'W' and 'R'.
+                    //  or WS and RS?
+
+
                     var stream = fs.createWriteStream(dest_path, {flags: 'w'});
+                    //var Stream = require('stream');
+
+
+                    console.log('stream ' + tof(stream));
+                    //console.log('readable ' + (stream instanceof Stream.Readable));
+                    //console.log('writable ' + (stream instanceof Stream.Writable));
+
                     //throw 'stop';
                     //stream.on('end', function() {
                     stream.on('close', function() {
@@ -3396,7 +3419,7 @@ PNG compression method 0
         // this would go through, unfiltering scanlines.
         
         var load_rgba_pixel_buffer_from_disk = function(source_path, callback) {
-            console.log('load_rgba_pixel_buffer_from_disk');
+            //console.log('load_rgba_pixel_buffer_from_disk');
             load_from_disk(source_path, function(err, res_png) {
                 if (err) {
                     var stack = new Error().stack;
@@ -3406,12 +3429,12 @@ PNG compression method 0
                     // will use:
                     //  var uf_slb = this.get_unfiltered_scanline_buffer(y);
                     //console.log('png load_rgba_pixel_buffer_from_disk loaded from disk');
-                    console.log('pre get pixel buffer from png');
+                    //console.log('pre get pixel buffer from png');
                     // I think this may be the slow part...
                     //  seems like loading the png itself is fairly fast. Getting the pixel buffer is the part that creates the new unfilteres scanline buffers,
                     //   would be faster just to have an unfiltered_scanlines_buffer.
                     var rgba32_buffer = res_png.get_rgba_pixel_buffer();
-                    console.log('post get pixel buffer from png');
+                    //console.log('post get pixel buffer from png');
                     
                     //console.log('got rgba32_buffer');
                     callback(null, rgba32_buffer);

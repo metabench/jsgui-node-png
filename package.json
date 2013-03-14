@@ -1,6 +1,6 @@
 {
   "name": "jsgui-node-png",
-  "version": "0.1.1",
+  "version": "0.4.0",
   "main": "jsgui-node-png.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
@@ -15,7 +15,7 @@
     "jsgui"
   ],
   "dependencies" : {
-    "jsgui-lang-essentials" :  "0.3.x",
+    "jsgui-lang-essentials" :  "0.4.x",
     "jsgui-node-pixel-buffer" :  "0.1.x",
     "amdefine": ">=0.0.4"
   },
