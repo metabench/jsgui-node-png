@@ -10,7 +10,7 @@
 #include <iostream>
 #include <jpeglib.h>
 #include <jerror.h>
-#import "fmemopen.h"
+//#import "fmemopen.h"
 #include "jpeg_decoder.h"
 //#include <jpeglib.h>
  
