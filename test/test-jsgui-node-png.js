@@ -2,8 +2,7 @@ if (typeof define !== 'function') {
     var define = require('amdefine')(module);
 }
 
-define(['../../core/jsgui-lang-essentials', 'fs', '../../image/jsgui-node-png', '../../image/jsgui-node-pixel-buffer',
-    '../../image/jsgui-node-pixel-buffer-process'], 
+define(['jsgui-lang-essentials', 'fs', 'jsgui-node-png', 'jsgui-node-pixel-buffer', 'jsgui-node-pixel-buffer-process'], 
 
 
     function(jsgui, fs, jsgui_png, Pixel_Buffer, pixel_buffer_processing) {
