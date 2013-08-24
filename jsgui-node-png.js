@@ -1,6 +1,18 @@
 if (typeof define !== 'function') {
     var define = require('amdefine')(module);
 }
+
+var cpp_mod = require("./build/Release/binding.node");
+
+// Want to add greyscale support.
+
+// Also need to test with paletted images.
+
+// Will also do do lossless conversion from RGB(A) to paletted.
+
+// I think a few more things will need to be done to get this to work correctly on indexed color.
+
+
 // could also use image_buffer...
 //  will get a new image_buffer from a PNG.
 
@@ -18,8 +30,8 @@ if (typeof define !== 'function') {
 
 
 
-define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-buffer'], 
-    function(jsgui, fs, zlib, CrcStream, Pixel_Buffer) {
+define(['jsgui-lang-essentials', 'fs', 'zlib', 'CrcStream', 'jsgui-node-pixel-buffer', 'binding.node'], 
+    function(jsgui, fs, zlib, CrcStream, Pixel_Buffer, cpp_mod) {
         
         var stringify = jsgui.stringify, each = jsgui.each, is_defined = jsgui.is_defined;
         var fp = jsgui.fp, tof = jsgui.tof;
@@ -63,14 +75,14 @@ define(['jsgui-lang-essentials', 'fs', 'zlib', './CrcStream', 'jsgui-node-pixel-
 
 PNG starts with an 8 byte signature
 
-137     A byte with its most significant bit set (``8-bit character'')
-80      P
-78      N
-71      G
-13      Carriage-return (CR) character, a.k.a. CTRL-M or ^M
-10      Line-feed (LF) character, a.k.a. CTRL-J or ^J
-26      CTRL-Z or ^Z
-10      Line-feed (LF) character, a.k.a. CTRL-J or ^J
+137	    A byte with its most significant bit set (``8-bit character'')
+80	    P
+78  	N
+71	    G
+13	    Carriage-return (CR) character, a.k.a. CTRL-M or ^M
+10	    Line-feed (LF) character, a.k.a. CTRL-J or ^J
+26	    CTRL-Z or ^Z
+10	    Line-feed (LF) character, a.k.a. CTRL-J or ^J
 
 137, 80, 78, 71, 13, 10, 26, 10
 
@@ -94,36 +106,35 @@ PNG color options
 
 Bits per pixel
 --------------
-Color option    Channels    Bits per channel
-                    1   2   4   8   16
-Indexed             1   1   2   4   8   
-Grayscale           1   1   2   4   8   16
-Grayscale & alpha   2               16  32
-Truecolor           3               24  48
-Truecolor & alpha   4               32  64
-
+Color option	Channels	Bits per channel
+                    1	2	4	8	16
+Indexed	            1	1	2	4	8	
+Grayscale	        1	1	2	4	8	16
+Grayscale & alpha	2				16	32
+Truecolor	        3				24	48
+Truecolor & alpha	4				32	64
 
 PNG color types
 ---------------
 Color
-type    Name    Binary  Masks
-    A   C   P
-0   Grayscale                       0   0   0   0    
-1   (Indexed grayscale)             0   0   0   1   palette
-2   Truecolor                       0   0   1   0   color
-3   Indexed                         0   0   1   1   palette
-4   Grayscale & alpha               0   1   0   0   alpha
-5   (Indexed grayscale & alpha)     0   1   0   1   palette
-6   Truecolor & alpha               0   1   1   0   color
-7   (Indexed & alpha)               0   1   1   1   color | palette
+type	Name	Binary	Masks
+ 	A	C	P
+0	Grayscale   	                0	0	0	0	 
+1	(Indexed grayscale)	            0	0	0	1	palette
+2	Truecolor	                    0	0	1	0	color
+3	Indexed	                        0	0	1	1	palette
+4	Grayscale & alpha       	    0	1	0	0	alpha
+5	(Indexed grayscale & alpha)	    0	1	0	1	palette
+6	Truecolor & alpha	            0	1	1	0	color
+7	(Indexed & alpha)	            0	1	1	1	color | palette
 
 
-Type byte   Filter name Predicted value
-0           None        Zero (so that the raw byte value passes through unaltered)
-1           Sub         Byte A (to the left)
-2           Up          Byte B (above)
-3           Average     Mean of bytes A and B, rounded down
-4           Paeth       A, B, or C, whichever is closest to p = A + B − C
+Type byte	Filter name	Predicted value
+0	        None	    Zero (so that the raw byte value passes through unaltered)
+1	        Sub	        Byte A (to the left)
+2	        Up	        Byte B (above)
+3	        Average	    Mean of bytes A and B, rounded down
+4	        Paeth	    A, B, or C, whichever is closest to p = A + B − C
 
 PNG compression method 0 
 (the only compression method presently defined for PNG) specifies deflate/inflate compression with a 32K sliding window.
@@ -137,13 +148,16 @@ PNG compression method 0
         
             if (p_left <= p_above && p_left <= p_above_left) {
                 return left;
-            } else if (p_above <= p_above_left) {
+            }
+            else if (p_above <= p_above_left) {
                 return above;
             }
             return above_left;
         };
         
         // Buffers read asyncronously... or some other things do here.
+
+        // extend Binary_File_Wrapper?
         
         var PNG = jsgui.Class.extend({
             'init': function(spec) {
@@ -277,6 +291,7 @@ PNG compression method 0
             // set the scanline filter on a row, but first cache its unfiltered scanline buffer
             
             'set_scanline_filter_all_rows': function(scanline_filter_num) {
+                console.log('set_scanline_filter_all_rows');
                 var h = this.size[1];
                 for (var y = 0; y < h; y++) {
                     this.set_scanline_filter(y, scanline_filter_num);
@@ -286,6 +301,8 @@ PNG compression method 0
             
             'set_scanline_filter': function(scanline_num, scanline_filter_byte) {
                 //this.map_unfiltered_scanline_buffers[scanline_num] = this.get_unfiltered_scanline_buffer(scanline_num);
+                
+                //console.log('set_scanline_filter');
                 this.set_scanline_filter_byte(scanline_num, scanline_filter_byte);
                 
                 // And then when saving it it should be 
@@ -307,6 +324,7 @@ PNG compression method 0
                     //throw '!!stop';
                     //console.log('this.bit_depth ' + this.bit_depth);
                     if (this.bit_depth == 8) {
+                        console.log('this.color_type ' + this.color_type);
                         if (this.color_type == 2) {
                             this.scanline_length = this.size[0] * 3 + 1;
                         }
@@ -370,6 +388,10 @@ PNG compression method 0
                 // can optimize this a lot.
                 //  when in the right mode, can almost read this out of the unfiltered scanlines buffer.
                 
+                // A C++ function could speed this up a lot, with the buffer copying.
+
+
+
                 var res = new Pixel_Buffer({
                     'size': this.size
                 });
@@ -381,9 +403,36 @@ PNG compression method 0
                 
                 var dest_buffer = res.buffer;
                 
-                //console.log('get_rgba_pixel_buffer color_type ' + color_type);
+                console.log('get_rgba_pixel_buffer color_type ' + color_type);
                 
                 // Slower here I think.
+                // color_type 0: greyscale
+
+                // also need to interate indexed color and indexed color with alpha.
+
+                // different pixel iterators depending on the number of bits per pixel.
+                if (color_type == 0) {
+                    // each pixel is a greyscale sample
+                    // each pixel has a single value
+                    // have a multiple to get from the pixel value to something up to 256.
+
+                    // Iterating through the pixels is slow.
+                    //  Could it be faster if C++ raised the callback?
+                    //   Or we pass a function into C++ for it to call? The same thing.
+
+                    // Maybe doing some colour change algorithms on rgba buffers to start with is best.
+
+
+
+
+
+                    this.iterate_pixels(function(x, y, pixel_value) {
+                        // set the red, green, blue value to each of them?
+                        console.log('pixel_value ' + pixel_value);
+
+                    });
+
+                }
                 
                 if (color_type == 2) {
                     this.iterate_pixels(function(x, y, r, g, b) {
@@ -391,12 +440,35 @@ PNG compression method 0
                         //console.log('g ' + g);
                         //console.log('b ' + b);
                         
-                        var alpha = 255;
+                        //var alpha = 255;
                         
                         //px[3] = 255;
-                        res.set_pixel(x, y, r, g, b, alpha);
+                        res.set_pixel(x, y, r, g, b, 255);
                     });
                 } else if (color_type == 6) {
+
+
+                    // .unfiltered_scanlines_buffer_to_new_rgba_buffer_cpp
+                    //  creates the new buffer object...
+                    // .copy_unfiltered_scanlines_buffer_to_rgba_buffer_cpp
+                    //  copies from what is almost an rgba buffer to an actual one.
+                    // means we don't need that loop in JavaScript, I think it can speed things up
+                    //  a fair bit.
+
+                    // .copy_unfiltered_scanlines_buffer_32_bpp_to_rgba_buffer_cpp
+
+
+
+
+
+
+
+                    //  would be a quick copy for this specific case.
+
+
+
+
+
                     // write directly to the res buffer, using the unfiltered scanlines.
                     // copy to res.buffer.
                     // get the unfiltered scanlines...
@@ -416,7 +488,8 @@ PNG compression method 0
                     //  then copy from parts of that.
                     //  don't want to be creating a buffer for each scanline.
                     
-                    this.ensure_unfiltered_scanlines_buffer();
+                    this.ensure_unfiltered_scanlines_buffer_cpp();
+
                     // reverse filtering the whole thing should not take too long.
                     // but will keep track of when different parts of it have been modified.
                     //  with PNGs in memory, may prefer to work on the unfiltered scanlines buffer.
@@ -424,9 +497,12 @@ PNG compression method 0
                     
                     
                     var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+
+                    res.buffer = cpp_mod.copy_unfiltered_scanlines_buffer_32_bpp_to_rgba_buffer_cpp(unfiltered_scanlines_buffer, res.buffer, unfiltered_scanlines_buffer_line_length);
+                    //console.log('res.buffer.length ' + res.buffer.length);
                     
-                    
-                    
+
+                    /*
                     for (var c = 0, l = this.size[1]; c < l; c++) {
                         dest_buffer_start_pos = dest_buffer_line_length * c;
                         unfiltered_scanlines_buffer_start_pos = unfiltered_scanlines_buffer_line_length * c;
@@ -438,14 +514,19 @@ PNG compression method 0
                         
                         //var uf_len = unfiltered_scanline_buffer.length;
                         //unfiltered_scanline_buffer.copy(dest_buffer, dest_buffer_start_pos, 1);
-                        //console.log('dest_buffer_start_pos ' + dest_buffer_start_pos);
-                        //console.log('unfiltered_scanlines_buffer_start_pos ' + unfiltered_scanlines_buffer_start_pos);
+                        console.log('dest_buffer_start_pos ' + dest_buffer_start_pos);
+                        console.log('unfiltered_scanlines_buffer_start_pos ' + unfiltered_scanlines_buffer_start_pos);
                         //console.log('unfiltered_scanlines_buffer_end_pos ' + unfiltered_scanlines_buffer_end_pos);
                         //console.log('unfiltered_scanlines_buffer.length ' + unfiltered_scanlines_buffer.length);
                         
                         unfiltered_scanlines_buffer.copy(dest_buffer, dest_buffer_start_pos, unfiltered_scanlines_buffer_start_pos + 1, unfiltered_scanlines_buffer_end_pos);
                         
                     }
+                    */
+                    
+                    
+                    
+                    
                     
                 } else {
                     this.iterate_pixels(function(x, y, px) {
@@ -498,24 +579,42 @@ PNG compression method 0
             
             // should not take all that long. will be faster then getting an unfiltered buffer for each scanline.
             //  simpler code than using the r,g,b(,a) components
+
+
             
-            'ensure_unfiltered_scanlines_buffer': function() {
+            '_ensure_unfiltered_scanlines_buffer': function() {
                 // does it for all scanlines.
                 //console.log('ensure_unfiltered_scanlines_buffer');
                 // needs to go through the (filtered) scanlines buffer and unfilter them.
                 
-                //console.log('ensure_unfiltered_scanlines_buffer');
+                // This is the next one to be optimized in C, within C++.
+                //  Like the other function, but this one is reverse filtering.
+
+
+
+
+
+                console.log('ensure_unfiltered_scanlines_buffer');
+
+                // This also does all of them at once.
+                //  May as well do the filtering to start with.
+
+
                 
                 // could check all scanlines first, see if they are all 0.
                 //  if so, we may not need to do anything.
                 //   need to develop some rules for dealing with this.
                 
                 var scanline_length = this.scanline_length;
+
+                //console.log('scanline_length ' + scanline_length);
+
                 var scanlines_buffer_length = scanline_length * this.size[1];
                 
                 if (!this.unfiltered_scanlines_buffer || this.unfiltered_scanlines_buffer.length != scanlines_buffer_length);
                 
                 this.unfiltered_scanlines_buffer = new Buffer(scanlines_buffer_length);
+                this.unfiltered_scanlines_buffer.fill(0);
                 //console.log('this.unfiltered_scanlines_buffer.length ' + this.unfiltered_scanlines_buffer.length);
                 
                 var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
@@ -547,8 +646,11 @@ PNG compression method 0
                 var filtered_byte;
                 var unfiltered_byte;
                 // maybe variables for byte_above?
-                
+                //console.log('bytes_per_pixel ' + bytes_per_pixel);
+                //throw 'stop';
                 for (var y = 0, h = this.size[1]; y < h; y++) {
+                    //console.log('ensure_unfiltered_scanlines_buffer y ' + y);
+
                     scanline_start = y * scanline_length;
                     scanline_filter_byte = scanlines_buffer.readUInt8(scanline_start);
                     
@@ -572,10 +674,20 @@ PNG compression method 0
                     
                     // left, above, average, paeth
                     unfiltered_scanlines_buffer.writeUInt8(0, scanline_start);
-                    
+                    //console.log('uas scanline_filter_byte ' + scanline_filter_byte);
                     if (scanline_filter_byte == 0) {
                         // copy over that scanline
-                        scanlines_buffer.copy(unfiltered_scanlines_buffer, scanline_start, scanline_start + scanline_length);
+                        //console.log('scanline_start ' + scanline_start);
+                        //console.log('scanline_length ' + scanline_length);
+                        //console.log('scanline_start ' + typeof scanline_start);
+                        //console.log('scanline_length ' + typeof scanline_length);
+                        //console.log('scanline_start + scanline_length ' + (scanline_start + scanline_length));
+
+                        var scanline_end = scanline_start + scanline_length;
+
+                        // Looks like buffer has had its syntax changed.
+
+                        scanlines_buffer.copy(unfiltered_scanlines_buffer, scanline_start, scanline_start, scanline_end);
                         
                     } else if (scanline_filter_byte == 1) {
                         for (b = 1; b < scanline_length; b++) {
@@ -583,9 +695,13 @@ PNG compression method 0
                             unfiltered_byte_left = 0;
                             byte_pos = scanline_start + b;
                             if (b >= bytes_per_pixel) {
+                                // Are we not trying to ensure the existance of these unfiltered values?
+                                //  but maybe we have the previous ones...
+
                                 byte_left_pos = byte_pos - bytes_per_pixel;
                                 unfiltered_byte_left = unfiltered_scanlines_buffer.readUInt8(byte_left_pos);
                             }
+                            //console.log('unfiltered_byte_left ' + unfiltered_byte_left);
                             filtered_byte = scanlines_buffer.readUInt8(byte_pos);
                             unfiltered_byte = unfiltered_byte_left + filtered_byte;
                             if (unfiltered_byte > 255) unfiltered_byte = unfiltered_byte - 256;
@@ -652,6 +768,9 @@ PNG compression method 0
                     }
                 }
                 
+                //for (var c = 0, l = this.unfiltered_scanlines_buffer.length; c < l; c++) {
+                //    console.log('uf val ' + this.unfiltered_scanlines_buffer.readUInt8(c));
+                //}
                 
                 //throw 'stop';
                 
@@ -679,6 +798,14 @@ PNG compression method 0
             // 'change_encoding'?
             
             // 'set_encoding'
+
+            // may use an inline pixel iteration boilerplate.
+            // may make a C++ plugin function that does the iteration and calls 
+            //  the callback for each pixel
+
+            // will make C++ functions that do the iteration + whatever optimization,
+            //  but will 
+
             
             'iterate_row': function(y, pixel_callback) {
                 //var uf_slb = this.get_unfiltered_scanline_buffer(y);
@@ -694,7 +821,7 @@ PNG compression method 0
                 
                 var scanline_length = this.scanline_length, bit_depth = this.bit_depth, color_type = this.color_type;
                 var w = this.size[0];
-                
+                var scanline_data_length = scanline_length - 1;
                 // Will need other iteration loops for different color depths.
                 
                 // different loops for different color modes / bit depths.
@@ -703,64 +830,210 @@ PNG compression method 0
                 var _3x, _4x;
                 
                 var unfiltered_row_start_pos = scanline_length * y;
-                
+                var scanlines_buffer = this.scanlines_buffer;
                 var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
                 //  should have the unfiltered scanlines buffer set up...
                 //   should be a part of loading the png.
                 
                 
-                if (this.color_type == 2) {
-                    // rgb
-                    
-                    if (bit_depth == 8) {
-                        // 24 bpp
-                        
-                        for (var x = 0; x < w; x++) {
-                            _3x = x * 3;
-                            r = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 1);
-                            g = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 2);
-                            b = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 3);
-                            //px = [r, g, b];
-                            //pixel_callback(x, y, px);
-                            pixel_callback(x, y, r, g, b);
-                        }
-                        // read the pixel values.
-                    
-                    } else {
-                        throw 'Unsupported bit_depth ' + bit_depth;
-                    }                 
-                }
-                
-                // 3 is indexed color.
-                //  will include low bit depths.
-                
-                if (this.color_type == 6) {
-                    // rgb
-                    
-                    if (bit_depth == 8) {
-                        // 24 bpp
-                        var _4x;
-                        
-                        for (var x = 0; x < w; x++) {
-                            _4x = 4 * x;
-                            r = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 1);
-                            g = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 2);
-                            b = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 3);
-                            a = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 4);
-                            //px = [r, g, b, a];
-                            //pixel_callback(x, y, px);
-                            pixel_callback(x, y, r, g, b, a);
-                        }
-                        // read the pixel values.
-                    
-                    } else {
-                        throw 'Unsupported bit_depth ' + bit_depth;
-                    }                 
-                }
                 
                 // other color types, bit depths for iteration accross the row.
                 //  will be iterating over an unfiltered row
                 
+            },
+
+            'iterate_pixels': function(pixel_callback) {
+                var width = this.size[0];
+                var height = this.size[1];
+                
+                // iterate each row.
+
+                var scanline_length = this.scanline_length, bit_depth = this.bit_depth, color_type = this.color_type;
+                var w = width;
+                var scanline_data_length = scanline_length - 1;
+                // Will need other iteration loops for different color depths.
+                
+                // different loops for different color modes / bit depths.
+                var r, g, b, px;
+                
+                var _3x, _4x;
+                
+                var unfiltered_row_start_pos = scanline_length * y;
+                var scanlines_buffer = this.scanlines_buffer;
+
+                if (!this.unfiltered_scanlines_buffer) this.ensure_unfiltered_scanlines_buffer_cpp();
+
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+                console.log('unfiltered_scanlines_buffer.length ' + unfiltered_scanlines_buffer.length);
+                var unfiltered_row_start_pos;
+
+
+                
+                for (var y = 0; y < height; y++) {
+                    //this.iterate_row(y, pixel_callback);
+                    // inline row iteration.
+                    unfiltered_row_start_pos = scanline_length * y;
+
+
+                    if (color_type == 0) {
+                        // bit-depth, calculate bits per pixel.
+                        // pixels per byte... will need to go through each byte getting the pixels from it.
+
+                        if (bit_depth == 1) {
+                            // there are 8 pixels per byte.
+                            //console.log('scanlines_buffer.length ' + scanlines_buffer.length);
+                            //console.log(scanlines_buffer.length / this.size[1]);
+                            // so look at every byte, then look at every bit in the byte with bit shifting (and masking)?
+                            //  or just use bit masks... could be faster.
+
+                            //byte_val & 128, 64, ... 1
+
+                            // work out the number of bytes per row.
+                            //  that could be the scanline_length.
+
+                            // also need to be careful about the number of pixels per row (this.size[0], w).
+                            // And do bit shifting I think.
+
+                            // for every byte, do it, but increment a counter for x?
+                            //console.log('y ' + y);
+                            // or do it for each value of x... can get the next item.
+                            //console.log('scanline_data_length ' + scanline_data_length);
+                            //console.log('scanline_length ' + scanline_length);
+                            //console.log('w ' + w);
+                            //console.log('unfiltered_row_start_pos ' + unfiltered_row_start_pos);
+
+
+                            //console.log('pixels_per_scanline ' + scanline_data_length * 8);
+
+                            // could go through the width...
+                            var x = 0;
+                            var scanline_byte_num = 1;
+                            var pixel_pos_in_byte = 0;
+                            var current_byte_value;
+                            var pixel_val;
+                            while(x < w) {
+                                //console.log('x ' + x);
+                                // get 8 pixels out of 1 byte.
+                                if (pixel_pos_in_byte == 0) {
+                                    //console.log('unfiltered_row_start_pos + scanline_byte_num ' + (unfiltered_row_start_pos + scanline_byte_num));
+                                    current_byte_value = scanlines_buffer.readUInt8(unfiltered_row_start_pos + scanline_byte_num);
+
+                                    // then & 1, no bitshift
+
+                                    //var pixel_val = current_byte_value & 1;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_val = (current_byte_value & 128) >> 7;
+                                    pixel_callback(x, y, pixel_val);
+
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 1) {
+                                    pixel_val = (current_byte_value & 64) >> 6;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 2) {
+                                    pixel_val = (current_byte_value & 32) >> 5;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 3) {
+                                    pixel_val = (current_byte_value & 16) >> 4;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 4) {
+                                    pixel_val = (current_byte_value & 8) >> 3;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 5) {
+                                    pixel_val = (current_byte_value & 4) >> 2;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 6) {
+                                    pixel_val = (current_byte_value & 2) >> 1;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte++;
+                                } else if (pixel_pos_in_byte == 7) {
+                                    //pixel_val = (current_byte_value & 128) >> 7;
+                                    //console.log('pixel_val ' + pixel_val);
+                                    pixel_val = current_byte_value & 1;
+                                    pixel_callback(x, y, pixel_val);
+                                    pixel_pos_in_byte = 0;
+                                    scanline_byte_num++;
+                                }
+                                x++;
+                            }
+                        }
+                    }
+
+                    if (color_type == 2) {
+                        // rgb
+                        
+                        if (bit_depth == 8) {
+                            // 24 bpp
+                            
+                            for (var x = 0; x < w; x++) {
+                                _3x = x * 3;
+                                r = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 1);
+                                g = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 2);
+                                b = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _3x + 3);
+                                //px = [r, g, b];
+                                //pixel_callback(x, y, px);
+                                pixel_callback(x, y, r, g, b);
+                            }
+                            // read the pixel values.
+                        
+                        } else {
+                            throw 'Unsupported bit_depth ' + bit_depth;
+                        }                 
+                    }
+                    
+                    // 3 is indexed color.
+                    //  will include low bit depths.
+                    
+                    if (color_type == 6) {
+                        // rgb
+                        
+                        if (bit_depth == 8) {
+                            // 24 bpp
+                            var _4x;
+                            
+                            for (var x = 0; x < w; x++) {
+                                _4x = 4 * x;
+                                r = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 1);
+                                g = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 2);
+                                b = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 3);
+                                a = unfiltered_scanlines_buffer.readUInt8(unfiltered_row_start_pos + _4x + 4);
+                                //px = [r, g, b, a];
+                                //pixel_callback(x, y, px);
+                                pixel_callback(x, y, r, g, b, a);
+                            }
+                            // read the pixel values.
+                        
+                        } else {
+                            throw 'Unsupported bit_depth ' + bit_depth;
+                        }                 
+                    }
+                    
+
+
+
+
+                }
+            },
+
+            '_iterate_pixels': function(pixel_callback) {
+                var width = this.size[0];
+                var height = this.size[1];
+                
+                // iterate each row.
+                
+                for (var y = 0; y < height; y++) {
+                    this.iterate_row(y, pixel_callback);
+                }
             },
             
             
@@ -771,6 +1044,8 @@ PNG compression method 0
             
             'analyse_scanline_filter_method_get_compressed_size': fp(function(a, sig) {
                 // this function could be remade so that it gets compressed filter sizes for all of the different scanline filtering options,
+                
+                
                 
                 var scanline_num, scanline_filter_byte, options = {}, callback;
                 
@@ -881,18 +1156,27 @@ PNG compression method 0
                 // deflate on each line seems best for the moment though.
                 
                 // best option at the moment is the scanline deflate test?
+                
                 // taking into consideration previous lines will help as well.
+                
+                
+                
                 
                 if (scanline_filter_byte == 0) {
                     // just copy it over to the scanlines_buffer
                     
                     // not sure if something needs to be done here... maybe.
+                    
                     // copy from unfiltered buffer to filtered buffer.
                     //this.unfiltered_scanlines_buffer
                     //console.log('this.unfiltered_scanlines_buffer ' + this.unfiltered_scanlines_buffer);
                     unfiltered_scanlines_buffer.copy(analysis_scanline_buffer, 0, scanline_start, scanline_start + this.scanline_length);
+                    
                     // it is the unfiltered value?
                     //  where do we get the various values from at this stage?
+                    
+                    
+                    
                     
                 }
                 
@@ -1145,7 +1429,7 @@ PNG compression method 0
                 var that = this;
                 
                 if (method == 'deflate') {
-                    //console.log('deflate analyse_scanlines_predict_best_filters ');
+                    console.log('deflate analyse_scanlines_predict_best_filters ');
                     that.analyse_scanlines_predict_best_filters({'method': method}, function(err, arr_predicted_best_scanline_filters) {
                         if (err) {
                             throw err;
@@ -1407,10 +1691,6 @@ PNG compression method 0
                 //    that would be faster. would make concurrency problems if two functions were to use it at once.
                 //     the compression is async.
                 
-                
-                
-                
-                
                 // and can put this inline in filter all scanlines as well.
                 //  that would likely wind up being faster.
                 
@@ -1615,7 +1895,7 @@ PNG compression method 0
                 
                 var options = {}, callback;
                 
-                console.log('sig ' + sig);
+                //console.log('optimize_filter_all_scanlines sig ' + sig);
                 
                 if (sig == '[f]') {
                     callback = a[0];
@@ -1629,7 +1909,7 @@ PNG compression method 0
                 // looks like the 'fast' option is not so fast, but much more optimized for 'mem' or 'ram'.
                 
                 var optimize = options.optimize || 'best';
-                console.log('optimize ' + optimize);
+                //console.log('optimize ' + optimize);
                 //throw 'stop';
                 // fast optimization will mean counting the recurring 16 bit and 32 bit words from the buffer.
                 
@@ -1648,6 +1928,10 @@ PNG compression method 0
                 //  at some stage it could be worth splitting optimizing functions into their own functions - repeating code, but less indirection.
                 
                 //console.log('optimize_filter_all_scanlines');
+
+                // This optimization is not working with color mode 2, rgb images.
+
+
                 
                 var scanlines_buffer = this.scanlines_buffer;
                 var scanline_length = this.scanline_length;
@@ -1803,6 +2087,8 @@ PNG compression method 0
                     
                     if (optimize == 'best') {
                         //scratch_full_buffers[0].writeUInt8(0, scanline_start);
+
+
                         scratch_full_buffers[1].writeUInt8(1, scanline_start);
                         scratch_full_buffers[2].writeUInt8(2, scanline_start);
                         scratch_full_buffers[3].writeUInt8(3, scanline_start);
@@ -2084,15 +2370,93 @@ PNG compression method 0
                 
                 
             }),
-            
-            
-            
-            'filter_all_scanlines': function() {
-                
-                //console.log('filter_all_scanlines');
+
+            'ensure_unfiltered_scanlines_buffer_cpp': function() {
+
+                // _ensure_unfiltered_scanlines_buffer
+
+
+                console.log('ensure_unfiltered_scanlines_buffer_cpp');
+                var scanlines_buffer = this.scanlines_buffer;
+                var scanline_length = this.scanline_length;
+
+                var unfiltered_scanlines_buffer = new Buffer(scanlines_buffer.length);
+                unfiltered_scanlines_buffer.fill(0);
+
+                var bytes_per_pixel = -1;
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        bytes_per_pixel = 3;
+                    }
+                    if (color_type == 6) {
+                        bytes_per_pixel = 4;
+                    }
+                }
+
+                cpp_mod.reverse_filter_all_scanlines(scanlines_buffer, unfiltered_scanlines_buffer, scanline_length, bytes_per_pixel);
+                //this._ensure_unfiltered_scanlines_buffer();
+                this.unfiltered_scanlines_buffer = unfiltered_scanlines_buffer;
                 //throw 'stop';
                 
+
+
+            },
+            
+            'filter_all_scanlines_cpp': function() {
+                console.log('filter_all_scanlines_cpp');
+
+                var scanlines_buffer = this.scanlines_buffer;
+                var scanline_length = this.scanline_length;
+                var unfiltered_scanlines_buffer = this.unfiltered_scanlines_buffer;
+
+                var bytes_per_pixel = -1;
+                if (bit_depth == 8) {
+                    if (color_type == 2) {
+                        bytes_per_pixel = 3;
+                    }
+                    if (color_type == 6) {
+                        bytes_per_pixel = 4;
+                    }
+                }
+
+                cpp_mod.filter_all_scanlines(scanlines_buffer, unfiltered_scanlines_buffer, scanline_length, bytes_per_pixel);
+
+
+
+
+
+
+            },
+            
+            'filter_all_scanlines': function() {
+
+
+                // and can compare this with the C function's output.
+                //  Can do this for a much simpler image.
+                //  Can make another test image, 4x4 with a red and blue stripe.
+                //   Then I can see the output of the C / C++ version alongside this.
+
+
+                
+                var stack = new Error().stack;
+                console.log(stack);
+
+                //throw 'stop';
+                console.log('* filter_all_scanlines');
+
+                // This function would be faster in ASM.
+                //  But faster still in C.
+
+                //for (var c = 0, l = this.unfiltered_scanlines_buffer.length; c < l; c++) {
+                //    console.log('uf val ' + this.unfiltered_scanlines_buffer.readUInt8(c));
+                //}
+                //throw '''stop';
+
+                //console.log('this.ensure_unfiltered_scanlines_buffer ' + this.ensure_unfiltered_scanlines_buffer);
+                
                 //this.ensure_unfiltered_scanlines_buffer();
+
+
                 
                 var h = this.size[1];
                 var scanline_filter_byte;
@@ -2124,14 +2488,22 @@ PNG compression method 0
                         bytes_per_pixel = 4;
                     }
                 }
+
+                //console.log('bytes_per_pixel ' + bytes_per_pixel);
+                //console.log('color_type ' + color_type);
                 
                 for (var y = 0; y < h; y++) {
                     //this.filter_scanline(y);
+                    //console.log('');
+                    //console.log('y ' + y);
+
                     scanline_num = y;
                     scanline_filter_byte = this.get_scanline_filter_byte(scanline_num);
+                    //console.log('scanline_filter_byte ' + scanline_filter_byte);
                     scanline_start = scanline_length * scanline_num;
                 
                     if (scanline_filter_byte == 0) {
+
                     }
                 
                     if (scanline_filter_byte == 1) {
@@ -2139,18 +2511,20 @@ PNG compression method 0
                         if (color_type == 2 || color_type == 6) {
                             for (b = 1; b < scanline_length; b++) {
                                 byte_pos = scanline_start + b;
+                                //console.log('filter_all_scanlines slf 1 byte_pos ' + byte_pos);
                                 unfiltered_byte_value_left = 0;
                                 if (b >= bytes_per_pixel) {
                                     unfiltered_byte_value_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - bytes_per_pixel);
                                 }
+                                //console.log('unfiltered_byte_value_left ' + unfiltered_byte_value_left);
                                 unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
                                 filtered_byte = unfiltered_byte - unfiltered_byte_value_left;
                                 if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
+                                //console.log('filtered_byte ' + filtered_byte);
                                 scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
                             }
                         }
                     }
-                
                     if (scanline_filter_byte == 2) {
                         // it's the 'above' filter.
                         if (color_type == 2 || color_type == 6) {
@@ -2168,7 +2542,6 @@ PNG compression method 0
                             }
                         }
                     }
-                
                     if (scanline_filter_byte == 3) {
                         // it's the 'average' filter.
                         // Average(x) = Raw(x) - floor((Raw(x-bpp)+Prior(x))/2)
@@ -2192,9 +2565,7 @@ PNG compression method 0
                                 if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
                                 scanlines_buffer.writeUInt8(filtered_byte, byte_pos);
                             }
-                        
                         }
-                    
                     }
                     
                     if (scanline_filter_byte == 4) {
@@ -2203,6 +2574,7 @@ PNG compression method 0
                         if (color_type == 2 || color_type == 6) {
                             for (b = 1; b < scanline_length; b++) {
                                 byte_pos = scanline_start + b;
+                                //console.log('byte_pos ' + byte_pos);
                                 unfiltered_byte_value_above = 0;
                                 has_left = b >= bytes_per_pixel;
                                 has_above = scanline_num > 0;
@@ -2220,6 +2592,8 @@ PNG compression method 0
                                     //var byte_above_left_pos = byte_pos - scanline_length - bytes_per_pixel;
                                     unfiltered_byte_value_above_left = unfiltered_scanlines_buffer.readUInt8(byte_pos - scanline_length - bytes_per_pixel);
                                 }
+
+
                                 unfiltered_byte = unfiltered_scanlines_buffer.readUInt8(byte_pos);
                                 filtered_byte = unfiltered_byte - paeth_predictor(unfiltered_byte_value_left, unfiltered_byte_value_above, unfiltered_byte_value_above_left);
                                 if (filtered_byte < 0) filtered_byte = filtered_byte + 256;
@@ -2227,14 +2601,12 @@ PNG compression method 0
                             }
                         }
                     }
-                    
-                    
                 }
+                //console.log('scanlines_buffer.length ' + scanlines_buffer.length);
             },
             
             
             '_filter_all_scanlines': function() {
-                
                 
                 console.log('filter_all_scanlines');
                 //throw 'stop';
@@ -2257,27 +2629,199 @@ PNG compression method 0
             //  could have option for highest compression using a GA and lots of time.
             //  as well as using the established filter method selection heuristic(s).
             
-            'iterate_pixels': function(pixel_callback) {
-                var width = this.size[0];
-                var height = this.size[1];
-                
-                // iterate each row.
-                
-                for (var y = 0; y < height; y++) {
-                    this.iterate_row(y, pixel_callback);
-                }
-            },
+            
             
             // convert to different format...
             //  want to investigate changing down to indexed color from an rgba image.
             //  can try different quantizing and dithering methods.
             
             'set_color_parameters': function(color_type, bit_depth) {
-                // could take a string such as 'rgba 32'.
+                // could take a string such as 'rgba 32'. ???
+                //  make more flexible with fp?
+
                 //console.log('set_color_parameters color_type ' + color_type);
                 //console.log('bit_depth ' + bit_depth);
                 //console.log('');
-                // 6    Truecolor & alpha
+
+                // Want to be able to set this to greyscale
+                //  (greyscale with alpha 4) 
+
+                var val;
+
+                // This loop is running pretty quick now!
+                //  The inline pixel iteration function does not seem that slow...
+                //   but of course that function call will come at a cost.
+
+                // Truecolor rgb, no alpha
+                if (color_type == 2) {
+                    if (bit_depth == 8) {
+                        console.log('converting to rgb no alpha');
+
+                        var trans_replacement_r = 255;
+                        var trans_replacement_g = 255;
+                        var trans_replacement_b = 255;
+
+                        if (typeof arguments[2] != 'undefined') trans_replacement_r = arguments[2];
+                        if (typeof arguments[3] != 'undefined') trans_replacement_g = arguments[3];
+                        if (typeof arguments[4] != 'undefined') trans_replacement_b = arguments[4];
+                        //console.log('trans_replacement_val ' + trans_replacement_val);
+                        //var trans_replacement_val = arguments[3] || 255;
+
+                        var scanline_data_length = 3 * this.size[0];
+                        var new_scanline_length = scanline_data_length + 1;
+                        var new_scanline_buffer_length = new_scanline_length * this.size[1];
+                        var new_scanline_buffer = new Buffer(new_scanline_buffer_length);
+                        var new_scanline_buffer_write_pos = 0;
+                        var pixel_pos_in_new_scanline_buffer, offset, round = Math.round;
+                        var that = this;
+
+                        this.iterate_pixels(function(x, y, r, g, b, a) {
+                            //val = round((r + g + b) / 3);
+                            if (x == 0) {
+                                offset = y * new_scanline_length;
+                                //console.log('offset ' + offset);
+                                new_scanline_buffer.writeUInt8(0, offset);
+                            }
+
+                            pixel_pos_in_new_scanline_buffer = (y * new_scanline_length) + 1 + (x * 3);
+                            //console.log('pixel_pos_in_new_scanline_buffer ' + pixel_pos_in_new_scanline_buffer);
+                            
+                            
+                            if (a == 0) {
+                                //new_scanline_buffer.writeUInt8(trans_replacement_val, pixel_pos_in_new_scanline_buffer);
+                                new_scanline_buffer.writeUInt8(trans_replacement_r, pixel_pos_in_new_scanline_buffer);
+                                new_scanline_buffer.writeUInt8(trans_replacement_g, pixel_pos_in_new_scanline_buffer + 1);
+                                new_scanline_buffer.writeUInt8(trans_replacement_b, pixel_pos_in_new_scanline_buffer + 2);
+
+                            } else {
+                                new_scanline_buffer.writeUInt8(r, pixel_pos_in_new_scanline_buffer);
+                                new_scanline_buffer.writeUInt8(g, pixel_pos_in_new_scanline_buffer + 1);
+                                new_scanline_buffer.writeUInt8(b, pixel_pos_in_new_scanline_buffer + 2);
+
+                            }
+
+                            // discard the aplha value
+                            //new_scanline_buffer.writeUInt8(a, pixel_pos_in_new_scanline_buffer + 1);
+                        })
+
+                        that.bit_depth = bit_depth;
+                        that.color_type = color_type;
+                        that.scanlines_buffer = new_scanline_buffer;
+                        that.palette = null;
+                        that.palette_with_alphas = null;
+                        that.scanline_length = new_scanline_length;
+                        that.scanline_data_length = new_scanline_length - 1;
+                    }
+                }
+
+                // Greyscale with no alpha.
+                if (color_type == 0) {
+                    if (bit_depth == 8) {
+                        console.log('converting to greyscale no alpha');
+
+                        var trans_replacement_val = 255;
+                        if (typeof arguments[2] != 'undefined') trans_replacement_val = arguments[2];
+                        //console.log('trans_replacement_val ' + trans_replacement_val);
+                        //var trans_replacement_val = arguments[3] || 255;
+
+                        var scanline_data_length = 1 * this.size[0];
+                        var new_scanline_length = scanline_data_length + 1;
+                        var new_scanline_buffer_length = new_scanline_length * this.size[1];
+                        var new_scanline_buffer = new Buffer(new_scanline_buffer_length);
+                        var new_scanline_buffer_write_pos = 0;
+                        var pixel_pos_in_new_scanline_buffer, offset, round = Math.round;
+                        var that = this;
+
+                        this.iterate_pixels(function(x, y, r, g, b, a) {
+                            val = round((r + g + b) / 3);
+                            if (x == 0) {
+                                offset = y * new_scanline_length;
+                                //console.log('offset ' + offset);
+                                new_scanline_buffer.writeUInt8(0, offset);
+                            }
+
+                            pixel_pos_in_new_scanline_buffer = (y * new_scanline_length) + 1 + (x * 1);
+                            //console.log('pixel_pos_in_new_scanline_buffer ' + pixel_pos_in_new_scanline_buffer);
+                            
+                            
+                            if (a == 0) {
+                                new_scanline_buffer.writeUInt8(trans_replacement_val, pixel_pos_in_new_scanline_buffer);
+                            } else {
+                                new_scanline_buffer.writeUInt8(val, pixel_pos_in_new_scanline_buffer);
+                            }
+
+                            // discard the aplha value
+                            //new_scanline_buffer.writeUInt8(a, pixel_pos_in_new_scanline_buffer + 1);
+                        })
+
+                        that.bit_depth = bit_depth;
+                        that.color_type = color_type;
+                        that.scanlines_buffer = new_scanline_buffer;
+                        that.palette = null;
+                        that.palette_with_alphas = null;
+                        that.scanline_length = new_scanline_length;
+                        that.scanline_data_length = new_scanline_length - 1;
+                    }
+                }
+
+
+                if (color_type == 4) {
+                    if (bit_depth == 8) {
+                        console.log('converting to greyscale with alpha');
+
+                        // inline pixel iteration here?
+                        //  
+
+                        // keep the same alpha,
+                        //  use the average of r, g, b
+
+                        // depending on what the current color mode is
+
+                        // 2 - truecolor
+                        // 6 - truecolor + alpha
+
+                        // 0 is greyscale no alpha
+                        //  but this has not been requested at the moment.
+
+                        // need to make a new scanline buffer - smaller this time.
+                        var scanline_data_length = 2 * this.size[0];
+                        var new_scanline_length = scanline_data_length + 1;
+                        var new_scanline_buffer_length = new_scanline_length * this.size[1];
+                        var new_scanline_buffer = new Buffer(new_scanline_buffer_length);
+                        var new_scanline_buffer_write_pos = 0;
+                        var pixel_pos_in_new_scanline_buffer, offset, round = Math.round;
+                        var that = this;
+
+                        this.iterate_pixels(function(x, y, r, g, b, a) {
+                            val = round((r + g + b) / 3);
+
+                            // then set the pixel?
+
+                            if (x == 0) {
+                                offset = y * new_scanline_length;
+                                //console.log('offset ' + offset);
+                                new_scanline_buffer.writeUInt8(0, offset);
+                            }
+
+                            pixel_pos_in_new_scanline_buffer = (y * new_scanline_length) + 1 + (x * 2);
+                            //console.log('pixel_pos_in_new_scanline_buffer ' + pixel_pos_in_new_scanline_buffer);
+                            new_scanline_buffer.writeUInt8(val, pixel_pos_in_new_scanline_buffer);
+                            new_scanline_buffer.writeUInt8(a, pixel_pos_in_new_scanline_buffer + 1);
+                        })
+
+                        that.bit_depth = bit_depth;
+                        that.color_type = color_type;
+                        that.scanlines_buffer = new_scanline_buffer;
+                        that.palette = null;
+                        that.palette_with_alphas = null;
+                        that.scanline_length = new_scanline_length;
+                        that.scanline_data_length = new_scanline_length - 1;
+
+
+                    }
+                }
+
+                // 6	Truecolor & alpha
                 //  32 bpp, bit depth is 8 bits per channel.
                 
                 // color_type 2 (rgb truecolor), bit depth 8
@@ -2290,6 +2834,8 @@ PNG compression method 0
                 if (color_type == 6) {
                     if (bit_depth == 8) {
                         // a lot bigger than 1 bpp indexed!
+
+                        throw 'stop, needs param changing, no [r,g,b,a] array any longer, they are separate params'
                         
                         var scanline_data_length = 4 * this.size[0];
                         //console.log('scanline_data_length ' + scanline_data_length);
@@ -2499,6 +3045,13 @@ PNG compression method 0
                     callback(IDAT_buffer);
                 });
                 
+                //console.log('');
+                //console.log('this.scanlines_buffer.length ' + this.scanlines_buffer.length);
+
+                //for (var c = 0, l = this.scanlines_buffer.length; c < l; c++) {
+                //    console.log('pre make idat val ' + this.scanlines_buffer.readUInt8(c));
+                //}
+
                 deflate.end(this.scanlines_buffer);
             },
             
@@ -2519,17 +3072,17 @@ PNG compression method 0
             
             // get this as an RGB or RGBA buffer.
             
-            
             //'save_to_stream': function(output_stream
             
             // a writable stream.
             'save_to_stream': fp(function(a, sig) {
+                console.log('save_to_stream');
                 var stream, options = {};
                 // stream
                 // stream, options
                 
-                //console.log('sig ' + sig);
-                //console.log('tof(a[0]) ' + tof(a[0]));
+                console.log('sig ' + sig);
+                console.log('tof(a[0]) ' + tof(a[0]));
                 if (sig == '[W]') {
                     stream = a[0];
                 }
@@ -2539,15 +3092,15 @@ PNG compression method 0
                 }
                 
                 var optimize = options.optimize;
-                //console.log('optimize ' + optimize);
+                console.log('optimize ' + optimize);
                 //throw 'stop';
+                //console.log('stream ' + stream);
+
                 
                 var that = this;
                 
-                
                 var do_optimize = function(callback) {
                     // optimizing the scanline filters.
-                    
                     if (optimize == 'fast' || optimize == 'best') {
                         
                         that.optimize_filter_all_scanlines({'optimize': optimize}, function(err, res_best_filters) {
@@ -2558,12 +3111,9 @@ PNG compression method 0
                         //    that.filter_all_scanlines();
                         //    callback(null, true);
                         //})
-                        
-                        
                     } else {
                         callback(null, true);
                     }
-                    
                 }
                 
                 var do_save = function() {
@@ -2590,20 +3140,14 @@ PNG compression method 0
                             do_save();
                         }
                     })
-                    
-                    
                 } else {
                     do_save();
                 }
-                
                 
                 // and this could also allow options and optimizations.
                 //  but that could be 'export'? may need to make a copy before saving with lossy options.
                 
                 // stream in a sig as S?
-                
-                
-                
                 // don't think callback is needed because we can detect when the stream ends.
                 
                 
@@ -2662,7 +3206,6 @@ PNG compression method 0
                 */
                 var that = this;
                 
-                
                 var do_save = function() {
                     //var that = this;
                     //console.log('do_save');
@@ -2673,12 +3216,10 @@ PNG compression method 0
                     // tof with wave 'W' and 'R'.
                     //  or WS and RS?
 
-
                     var stream = fs.createWriteStream(dest_path, {flags: 'w'});
                     //var Stream = require('stream');
 
-
-                    console.log('stream ' + tof(stream));
+                    //console.log('stream ' + tof(stream));
                     //console.log('readable ' + (stream instanceof Stream.Readable));
                     //console.log('writable ' + (stream instanceof Stream.Writable));
 
@@ -2696,11 +3237,9 @@ PNG compression method 0
                 
                 // this does not change the filter used on scanlines, but we may want to reencode scanlines after having changed
                 //  unencoded scanlines.
-                
                 // This may need to update the scanlines from the unfiltered data.
                 
                 // Can be broken into a few save functions.
-                
                 
                 // create a write buffer
                 //  the various parts will be saved
@@ -2735,7 +3274,7 @@ PNG compression method 0
                 // get to read through the whole buffer.
                 
                 // will load it chunk by chunk.
-                
+                //console.log('load_from_buffer ');
                 // buffer.length
                 // use a finite state machine to read through the buffer.
                 
@@ -2786,6 +3325,9 @@ PNG compression method 0
                     // and depends on the color mode.
                     
                     if (bit_depth == 1) {
+                        // not quite sure...
+                        //  32 pixels wide... therefore 
+
                         scanline_image_data_length = Math.ceil(that.size[0] / 8);
                     }
                     if (bit_depth == 2) {
@@ -2801,6 +3343,9 @@ PNG compression method 0
                             scanline_image_data_length = that.size[0] * 4;
                         }
                     }
+
+                    //console.log('scanline_image_data_length ' + scanline_image_data_length);
+                    //throw 'stop';
                     
                     // bit depth 16...
                     //  was not expecting that. greyscale of some kind.
@@ -2818,6 +3363,8 @@ PNG compression method 0
                     that.scanline_length = scanline_length;
                     
                     var scanlines_buffer_length = that.scanline_length * that.size[1];
+                    //console.log('scanlines_buffer_length ' + scanlines_buffer_length);
+                    //throw 'stop';
                     that.scanlines_buffer_length = scanlines_buffer_length;
                     
                     var scanlines_buffer = new Buffer(scanlines_buffer_length);
@@ -2839,7 +3386,7 @@ PNG compression method 0
                 
                 var found_PLTE_chunk = function(chunk_buffer) {
                     var chunk_length = chunk_buffer.readUInt32BE(0);
-                    //console.log('PLTE chunk_length ' + chunk_length);
+                    console.log('PLTE chunk_length ' + chunk_length);
                     
                     // then we get the chunk data... all the colors
                     
@@ -2850,6 +3397,13 @@ PNG compression method 0
                     
                     var c = 0;
                     var color_begin_pos = 8;
+
+                    // create a palette buffer, with the data for the chunk.
+                    //  will be simpler operating on a low level buffer like that.
+
+                    that.palette_buffer = new Buffer(chunk_length);
+                    chunk_buffer.copy(that.palette_buffer, 0, 8, 8 + chunk_length);
+
                     while (c < num_colors) {
                         // the color is stored as 4 1 byte values.
                         //  but the info about color locations could be parsed out?
@@ -3177,7 +3731,8 @@ PNG compression method 0
                 
                 fs.open(source_path, 'r', function(err, fd) {
                     if (err) {
-                        
+                        //throw err;
+                        return callback(err);
                     } else {
                         var src = fs.createReadStream(source_path);
                         that.load_from_stream(src, callback);
@@ -3298,6 +3853,7 @@ PNG compression method 0
                                 
                                 // interpret the chunk, and raise an event for having found that kind of chunk.
                                 
+
                                 var chunk_length = chunk_buffer.readUInt32BE(0);
                                 //console.log('chunk_length ' + chunk_length);
                                 
@@ -3418,8 +3974,8 @@ PNG compression method 0
         
         // this would go through, unfiltering scanlines.
         
-        var load_rgba_pixel_buffer_from_disk = function(source_path, callback) {
-            //console.log('load_rgba_pixel_buffer_from_disk');
+        var load_pixel_buffer_from_disk = function(source_path, callback) {
+            console.log('PNG: load_pixel_buffer_from_disk');
             load_from_disk(source_path, function(err, res_png) {
                 if (err) {
                     var stack = new Error().stack;
@@ -3428,13 +3984,13 @@ PNG compression method 0
                 } else {
                     // will use:
                     //  var uf_slb = this.get_unfiltered_scanline_buffer(y);
-                    //console.log('png load_rgba_pixel_buffer_from_disk loaded from disk');
-                    //console.log('pre get pixel buffer from png');
+                    //console.log('png load_pixel_buffer_from_disk loaded from disk');
+                    console.log('pre get pixel buffer from png');
                     // I think this may be the slow part...
                     //  seems like loading the png itself is fairly fast. Getting the pixel buffer is the part that creates the new unfilteres scanline buffers,
                     //   would be faster just to have an unfiltered_scanlines_buffer.
                     var rgba32_buffer = res_png.get_rgba_pixel_buffer();
-                    //console.log('post get pixel buffer from png');
+                    console.log('post get pixel buffer from png');
                     
                     //console.log('got rgba32_buffer');
                     callback(null, rgba32_buffer);
@@ -3442,14 +3998,18 @@ PNG compression method 0
             })
         };
         
-        var save_rgba_pixel_buffer_to_disk = fp(function(a, sig) {
+        var save_pixel_buffer_to_disk = fp(function(a, sig) {
             // need to have Buffer as a type in signatures.
             //  Think it will be B.
             
             // rbga_buffer, dest_path, callback
             
             var rbga_buffer, dest_path, options = {}, callback;
-            //console.log('sig ' + sig);
+            console.log('sig ' + sig);
+
+            // problem getting the signature of the buffer.
+
+            
             //throw 'stop';
             
             if (sig == '[o,s,f]') {
@@ -3574,7 +4134,7 @@ PNG compression method 0
             if (scanline_encoding != false) {
                 if (tof(scanline_encoding) == 'number') {
                     png.set_scanline_filter_all_rows(scanline_encoding);
-                    png.filter_all_scanlines();
+                    png.filter_all_scanlines_cpp();
                 }
                 
             }
@@ -3600,8 +4160,8 @@ PNG compression method 0
             'load_metadata_from_disk': load_metadata_from_disk,
             'PNG': PNG,
             'load_from_disk': load_from_disk,
-            'load_rgba_pixel_buffer_from_disk': load_rgba_pixel_buffer_from_disk,
-            'save_rgba_pixel_buffer_to_disk': save_rgba_pixel_buffer_to_disk
+            'load_pixel_buffer_from_disk': load_pixel_buffer_from_disk,
+            'save_pixel_buffer_to_disk': save_pixel_buffer_to_disk
         }
         return png;
     }
