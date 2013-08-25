@@ -1,6 +1,6 @@
 {
     "name": "jsgui-node-png",
-    "version": "0.4.61",
+    "version": "0.4.92",
     "main": "jsgui-node-png.js",
     "scripts": {
         "test": "echo \"Error: no test specified\" && exit 1"
