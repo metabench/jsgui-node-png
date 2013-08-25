@@ -30,7 +30,8 @@ var cpp_mod = require("./build/Release/binding.node");
 
 
 
-define(['jsgui-lang-essentials', 'fs', 'zlib', 'CrcStream', 'jsgui-node-pixel-buffer', 'binding.node'], 
+define(["jsgui-lang-essentials", "fs", "zlib", "./CrcStream", "jsgui-node-pixel-buffer", "
+./build/Release/binding.node"], 
     function(jsgui, fs, zlib, CrcStream, Pixel_Buffer, cpp_mod) {
         
         var stringify = jsgui.stringify, each = jsgui.each, is_defined = jsgui.is_defined;
