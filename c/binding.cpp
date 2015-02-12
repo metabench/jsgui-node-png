@@ -4,7 +4,7 @@
 #include <stdlib.h>
 #include <errno.h>
 #include <cmath>
-#include <stdbool.h>
+//#include <stdbool.h>
 #include <stdio.h>
 #include <list>
 #include <iostream>
@@ -13,12 +13,12 @@
 //#import "fmemopen.h"
 #include "jpeg_decoder.h"
 //#include <jpeglib.h>
- 
+
 using namespace node;
 using namespace v8;
 using namespace std;
- 
- 
+
+
 int fib(int n)
 {
   if(n < 2)
@@ -29,22 +29,22 @@ int fib(int n)
   {
       return fib(n-1) + fib(n-2);
   }
- 
+
 }
- 
- 
+
+
 static Handle<Value> fib_number(const Arguments& args)
 {
- 
+
     HandleScope scope;
- 
- 
+
+
     int n = args[0]->Int32Value();
- 
+
     int result = fib(n);
- 
+
     return scope.Close(Integer::New(result));
- 
+
 }
 
 
@@ -53,7 +53,7 @@ static Handle<Value> fib_number(const Arguments& args)
 // Code from http://www.samcday.com.au/blog/2011/03/03/creating-a-proper-buffer-in-a-node-c-addon/
 static Handle<Value> buffer_copy(const Arguments& args)
 {
- 
+
     HandleScope scope;
     Local<Value> arg(args[0]);
 
@@ -86,15 +86,15 @@ static Handle<Value> buffer_copy(const Arguments& args)
     // Third arg is the offset in the SlowBuffer we want the .. "Fast"Buffer to start at.
     v8::Handle<v8::Value> constructorArgs[3] = { slowBuffer->handle_, v8::Integer::New(length), v8::Integer::New(0) };
 
-    // Now we have our constructor, and our constructor args. Let's create the 
+    // Now we have our constructor, and our constructor args. Let's create the
     // damn Buffer already!
     v8::Local<v8::Object> actualBuffer = bufferConstructor->NewInstance(3, constructorArgs);
     //int n = args[0]->Int32Value();
- 
+
     //int result = fib(n);
     return scope.Close(actualBuffer);
     //return scope.Close(data);
- 
+
     //return scope.Close(Integer::New(10));
 }
 
@@ -149,7 +149,7 @@ unsigned char paeth_predictor(unsigned char left, unsigned char above, unsigned 
 
 
 
-// 
+//
 static Handle<Value> read_jpeg_to_rgb(const Arguments& args) {
   // Returns a new rgb buffer containing the JPEG.
   cout << endl << "new read_jpeg_to_rgb" << endl;
@@ -237,11 +237,11 @@ static Handle<Value> read_jpeg_to_rgb(const Arguments& args) {
   //XInfo_t      xinfo  = getXInfo(":0");
   //struct jpeg_compress_struct cinfo;
   //struct jpeg_error_mgr       jerr;
-   
+
   //cinfo.err = jpeg_std_error(&jerr);
   //jpeg_create_compress(&cinfo);
   //jpeg_stdio_dest(&cinfo, outfile);
-   
+
   //cinfo.image_width      = xinfo.width;
   //cinfo.image_height     = xinfo.height;
   //cinfo.input_components = 3;
@@ -271,7 +271,7 @@ static Handle<Value> copy_rgba_pixel_buffer_to_rgba_pixel_buffer_region(const Ar
   HandleScope scope;
   Local<Value> arg0(args[0]);
   unsigned char*  source_buffer = (unsigned char*)Buffer::Data(arg0);
-  
+
   int source_buffer_scanline_length = args[1]->Int32Value();
 
   Local<Value> arg2(args[2]);
@@ -298,19 +298,19 @@ static Handle<Value> copy_rgba_pixel_buffer_to_rgba_pixel_buffer_region(const Ar
   //cout << "source_h " << source_h << endl;
 
   int dest_buffer_line_pos;
-  
+
   for (y = 0; y < source_h; y++) {
 
-    
+
     source_buffer_line_start_pos = (y * source_buffer_scanline_length);
     //source_buffer_line_end_pos = source_buffer_line_start_pos + source_buffer_scanline_length;
-    
+
     dest_buffer_subline_start_pos = ((y + destY) * dest_buffer_scanline_length) + destX * 4;
     //var dest_buffer_subline_end_pos = dest_buffer_subline_start_pos + source_buffer_line_length;
     //cout << "source_buffer_line_start_pos " << source_buffer_line_start_pos << endl;
     //cout << "source_buffer_line_end_pos " << source_buffer_line_end_pos << endl;
     //cout << "dest_buffer_subline_start_pos " << dest_buffer_subline_start_pos << endl;
-    
+
     // buf.copy(targetBuffer, [targetStart], [sourceStart], [sourceEnd])
     /*
     source_buffer.copy(dest_buffer, dest_buffer_subline_start_pos + dest_buffer_start_offset, source_buffer_line_start_pos, source_buffer_line_end_pos);
@@ -321,7 +321,7 @@ static Handle<Value> copy_rgba_pixel_buffer_to_rgba_pixel_buffer_region(const Ar
     // Go through x...
 
     //memcpy(dest, source, length);
-    
+
     memcpy(dest_buffer + dest_buffer_subline_start_pos, source_buffer + source_buffer_line_start_pos, source_buffer_scanline_length);
 
 
@@ -341,7 +341,7 @@ static Handle<Value> copy_rgba_pixel_buffer_to_rgba_pixel_buffer_region(const Ar
 
       //cout << "val " << val << endl;
       //rgba_buffer[dest_buffer_start_pos + x] = val;
-      
+
       //val = unfiltered_scanlines_buffer[unfiltered_scanlines_buffer_start_pos + x + 1];
       //rgba_buffer[dest_buffer_start_pos + x] = val;
       //rgba_buffer[dest_buffer_start_pos + x] = unfiltered_scanlines_buffer[unfiltered_scanlines_buffer_start_pos + x + 1];
@@ -352,7 +352,7 @@ static Handle<Value> copy_rgba_pixel_buffer_to_rgba_pixel_buffer_region(const Ar
     */
 
   }
-  
+
 
 
 
@@ -370,7 +370,7 @@ static Handle<Value> copy_unfiltered_scanlines_buffer_32_bpp_to_rgba_buffer_cpp(
   HandleScope scope;
   Local<Value> arg0(args[0]);
   unsigned char*  unfiltered_scanlines_buffer = (unsigned char*)Buffer::Data(arg0);
-  
+
   Local<Value> arg1(args[1]);
   unsigned char*  rgba_buffer = (unsigned char*)Buffer::Data(arg1);
 
@@ -398,7 +398,7 @@ static Handle<Value> copy_unfiltered_scanlines_buffer_32_bpp_to_rgba_buffer_cpp(
   //dest_buffer_start_pos = dest_buffer_line_length * c;
   //unfiltered_scanlines_buffer_start_pos = unfiltered_scanlines_buffer_line_length * c;
   //unfiltered_scanlines_buffer_end_pos = unfiltered_scanlines_buffer_start_pos + unfiltered_scanlines_buffer_line_length;
-  
+
   unsigned char val;
   int x, y;
   int dest_buffer_start_pos, unfiltered_scanlines_buffer_start_pos;
@@ -408,7 +408,7 @@ static Handle<Value> copy_unfiltered_scanlines_buffer_32_bpp_to_rgba_buffer_cpp(
     //cout << "dest_buffer_start_pos " << dest_buffer_start_pos << endl;
     unfiltered_scanlines_buffer_start_pos = (scanline_length * y);
     //cout << "unfiltered_scanlines_buffer_start_pos " << unfiltered_scanlines_buffer_start_pos << endl;
-    
+
 
     memcpy(rgba_buffer + dest_buffer_start_pos, unfiltered_scanlines_buffer + unfiltered_scanlines_buffer_start_pos + 1, dest_buffer_line_length);
     /*
@@ -416,7 +416,7 @@ static Handle<Value> copy_unfiltered_scanlines_buffer_32_bpp_to_rgba_buffer_cpp(
       //
       //cout << "val " << val << endl;
       //rgba_buffer[dest_buffer_start_pos + x] = val;
-      
+
       //val = unfiltered_scanlines_buffer[unfiltered_scanlines_buffer_start_pos + x + 1];
       //rgba_buffer[dest_buffer_start_pos + x] = val;
       rgba_buffer[dest_buffer_start_pos + x] = unfiltered_scanlines_buffer[unfiltered_scanlines_buffer_start_pos + x + 1];
@@ -439,10 +439,10 @@ static Handle<Value> reverse_filter_all_scanlines(const Arguments& args)
   HandleScope scope;
   Local<Value> arg0(args[0]);
   unsigned char*  scanlines_buffer = (unsigned char*)Buffer::Data(arg0);
-  
+
   Local<Value> arg1(args[1]);
   unsigned char*  unfiltered_scanlines_buffer = (unsigned char*)Buffer::Data(arg1);
-  
+
   int scanline_length = args[2]->Int32Value();
   int bytes_per_pixel = args[3]->Int32Value();
 
@@ -457,7 +457,7 @@ static Handle<Value> reverse_filter_all_scanlines(const Arguments& args)
 
   unsigned char scanline_filter_byte;
   int scanline_start;
-  unsigned char unfiltered_byte_left, unfiltered_byte_above, 
+  unsigned char unfiltered_byte_left, unfiltered_byte_above,
     unfiltered_byte_above_left, unfiltered_byte, filtered_byte;
 
   bool has_left, has_above;
@@ -518,7 +518,7 @@ static Handle<Value> reverse_filter_all_scanlines(const Arguments& args)
         unfiltered_scanlines_buffer[byte_pos] = unfiltered_byte;
       }
 
-      
+
     }
     if (scanline_filter_byte == 2) {
       /*
@@ -605,21 +605,21 @@ static Handle<Value> reverse_filter_all_scanlines(const Arguments& args)
 
 static Handle<Value> filter_all_scanlines(const Arguments& args)
 {
- 
+
     HandleScope scope;
     Local<Value> arg0(args[0]);
     unsigned char*  scanlines_buffer = (unsigned char*)Buffer::Data(arg0);
-    
+
     Local<Value> arg1(args[1]);
     unsigned char*  unfiltered_scanlines_buffer = (unsigned char*)Buffer::Data(arg1);
-    
+
     int scanline_length = args[2]->Int32Value();
     int bytes_per_pixel = args[3]->Int32Value();
 
     //cout << "filter_all_scanlines scanline_length " << scanline_length << endl;
     //int h = args[2]->Int32Value();
     // also want width and height arguments
-    
+
     int scanlines_buffer_length = (int)Buffer::Length(arg0);
     // can work out the height.
     int height = scanlines_buffer_length / scanline_length;
@@ -627,7 +627,7 @@ static Handle<Value> filter_all_scanlines(const Arguments& args)
 
     unsigned char scanline_filter_byte;
     int scanline_start;
-    unsigned char unfiltered_byte_value_left, unfiltered_byte_value_above, 
+    unsigned char unfiltered_byte_value_left, unfiltered_byte_value_above,
       unfiltered_byte_value_above_left, unfiltered_byte, filtered_byte;
 
     bool has_left, has_above;
@@ -741,7 +741,7 @@ static Handle<Value> filter_all_scanlines(const Arguments& args)
 
 static Handle<Value> rgba_buffer_self_simple_fade(const Arguments& args)
 {
- 
+
     HandleScope scope;
     Local<Value> arg(args[0]);
     unsigned char*  data = (unsigned char*)Buffer::Data(arg);
@@ -750,7 +750,7 @@ static Handle<Value> rgba_buffer_self_simple_fade(const Arguments& args)
     // also want width and height arguments
 
     int l = w * h;
-    
+
     //int length = (int)Buffer::Length(arg);
 
     //int length = (int)Buffer::Length(arg);
@@ -769,13 +769,13 @@ static Handle<Value> rgba_buffer_self_simple_fade(const Arguments& args)
        // }
     }
 
- 
+
     //int n = args[0]->Int32Value();
- 
+
     //int result = fib(n);
     return scope.Close(args[0]);
     //return scope.Close(data);
- 
+
     //return scope.Close(Integer::New(10));
 }
 // read_jpeg_to_rgb
